@@ -1,5 +1,5 @@
 /**
- * server/src/hardware/interface/interfaces.cpp
+ * server/src/hardware/protocol/tracknroute/iohandler/serialiohandler.hpp
  *
  * This file is part of the traintastic source code.
  *
@@ -20,18 +20,30 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#include "interfaces.hpp"
-#include "../../utils/ifclassidcreate.hpp"
-#include "../../world/world.hpp"
+#ifndef TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_TRACKNROUTE_IOHANDLER_SERIALIOHANDLER_HPP
+#define TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_TRACKNROUTE_IOHANDLER_SERIALIOHANDLER_HPP
 
-std::shared_ptr<Interface> Interfaces::create(const std::shared_ptr<World>& world, std::string_view classId, std::string_view id)
+#include "iohandler.hpp"
+#include <boost/asio/serial_port.hpp>
+
+namespace TracknRoute {
+
+class SerialIOHandler : public IOHandler
 {
-  IF_CLASSID_CREATE(DCCPlusPlusInterface)
-  IF_CLASSID_CREATE(ECoSInterface)
-  IF_CLASSID_CREATE(LocoNetInterface)
-  IF_CLASSID_CREATE(TracknRouteInterface)
-  IF_CLASSID_CREATE(WlanMausInterface)
-  IF_CLASSID_CREATE(XpressNetInterface)
-  IF_CLASSID_CREATE(Z21Interface)
-  return std::shared_ptr<Interface>();
+  private:
+    boost::asio::serial_port m_serialPort;
+
+    void read();
+    void write() final;
+
+  public:
+    SerialIOHandler(Kernel& kernel, const std::string& device);
+    ~SerialIOHandler() override;
+
+    void start() override;
+    void stop() final;
+};
+
 }
+
+#endif

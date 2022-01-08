@@ -72,6 +72,7 @@ enum class LogMessage : uint32_t
   I2001_UNKNOWN_LOCO_ADDRESS_X = LogMessageOffset::info + 2001,
   I2002_HARDWARE_TYPE_X = LogMessageOffset::info + 2002,
   I2003_FIRMWARE_VERSION_X = LogMessageOffset::info + 2003,
+  I2004_HARDWARE_VERSION_X = LogMessageOffset::info + 2004,
   I9999_X = LogMessageOffset::info + 9999,
 
   // Notice:

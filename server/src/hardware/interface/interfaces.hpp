@@ -29,6 +29,7 @@
 #include "dccplusplusinterface.hpp"
 #include "ecosinterface.hpp"
 #include "loconetinterface.hpp"
+#include "tracknroutinterface.hpp"
 #include "wlanmausinterface.hpp"
 #include "xpressnetinterface.hpp"
 #include "z21interface.hpp"
@@ -41,6 +42,7 @@ struct Interfaces
     DCCPlusPlusInterface::classId,
     ECoSInterface::classId,
     LocoNetInterface::classId,
+    TracknRouteInterface::classId,
     WlanMausInterface::classId,
     XpressNetInterface::classId,
     Z21Interface::classId
