@@ -3,6 +3,27 @@ include(../shared/traintastic.cmake)
 project(traintastic-server VERSION ${TRAINTASTIC_VERSION} DESCRIPTION "Traintastic server")
 include(GNUInstallDirs)
 
+if(CMAKE_C_COMPILER_ID MATCHES "MSVC" OR
+   CMAKE_C_COMPILER_ID MATCHES "Clang")
+	add_definitions(/D_CRT_SECURE_NO_DEPRECATE)
+    add_definitions(/DMCO_WIN_PLATFORM)
+    #add_definitions(/D_CRTDBG_MAP_ALLOC)
+    add_definitions(/MP)
+endif()
+
+set(TRAINTASTIC_BINARY_DIR ${CMAKE_BINARY_DIR}/../../run/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${TRAINTASTIC_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${TRAINTASTIC_BINARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${TRAINTASTIC_BINARY_DIR})
+
+# Set for all build configurations (e.g. Debug, Release) one output folder
+foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG )
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${TRAINTASTIC_BINARY_DIR})
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${TRAINTASTIC_BINARY_DIR})
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${TRAINTASTIC_BINARY_DIR})
+endforeach(OUTPUTCONFIG CMAKE_CONFIGURATION_TYPES)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 include(code-coverage)
@@ -235,7 +256,7 @@ if(WIN32)
 
   # copy archive.dll to build directory:
   add_custom_command(TARGET traintastic-server POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.dll" .)
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.dll" ${TRAINTASTIC_BINARY_DIR})
 elseif(APPLE)
   set(LibArchive_INCLUDE_DIRS "/usr/local/opt/libarchive/include")
   set(LibArchive_LIBRARIES "/usr/local/opt/libarchive/lib/libarchive.dylib")
@@ -257,10 +278,11 @@ if(WIN32)
     COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
   add_custom_command(TARGET traintastic-server-test PRE_LINK
     COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
-
+  add_custom_command(TARGET traintastic-server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" ${TRAINTASTIC_BINARY_DIR})
   # copy lua53.dll to build directory, to be able to run the tests:
   add_custom_command(TARGET traintastic-server-test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" .)
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" ${TRAINTASTIC_BINARY_DIR})
 elseif(APPLE)
   set(LUA_INCLUDE_DIR "/usr/local/opt/lua@5.3/include/lua")
   set(LUA_LIBRARIES "/usr/local/opt/lua@5.3/lib/liblua5.3.dylib")

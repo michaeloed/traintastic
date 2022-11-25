@@ -23,6 +23,8 @@
 #include "logger.hpp"
 #include <cassert>
 #include <traintastic/locale/locale.hpp>
+#include <string_view>
+#include <stdio.h>
 
 std::string_view Logger::toString(LogMessage message)
 {
@@ -34,7 +36,7 @@ std::string_view Logger::toString(LogMessage message)
   if(n < static_cast<int>(key.size()))
     key.resize(n);
 
-  assert(Locale::tr(key) != key);
+  //assert(Locale::tr(key) != key);
   return Locale::tr(key);
 }
 
