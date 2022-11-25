@@ -29,6 +29,8 @@
 #include "subwindow/subwindowtype.hpp"
 
 class MdiArea;
+class MainWindowStatusBar;
+class QMdiSubWindow;
 class QSplitter;
 class QActionGroup;
 class QToolButton;
@@ -48,9 +50,13 @@ class MainWindow : public QMainWindow
   protected:
     std::shared_ptr<Connection> m_connection;
     ObjectPtr m_world;
+    int m_clockRequest;
+    ObjectPtr m_clock;
     QSplitter* m_splitter;
     MdiArea* m_mdiArea;
+    MainWindowStatusBar* m_statusBar;
     ServerLogWidget* m_serverLog;
+    QMdiSubWindow* m_clockWindow = nullptr;
     QMap<QString, SubWindow*> m_subWindows;
     // Main menu:
     QAction* m_actionConnectToServer;
@@ -70,6 +76,7 @@ class MainWindow : public QMainWindow
     QAction* m_worldPowerOffAction;
     QAction* m_worldStopAction;
     QAction* m_worldRunAction;
+    QAction* m_clockAction;
     QAction* m_worldMuteMenuAction;
     QAction* m_worldNoSmokeMenuAction;
     QAction* m_worldEditAction;
@@ -78,6 +85,7 @@ class MainWindow : public QMainWindow
     QAction* m_actionLuaScript;
     QAction* m_actionFullScreen;
     QAction* m_actionViewToolbar;
+    QAction* m_actionClock;
     QMenu* m_menuServer;
     QAction* m_actionServerSettings;
     QAction* m_actionServerRestart;
@@ -102,6 +110,7 @@ class MainWindow : public QMainWindow
     void disconnectFromServer();
     void loadWorld();
     void toggleFullScreen();
+    void viewClockWindow(bool value);
     void toggleServerLog();
     void showAbout();
     void connectionStateChanged();
@@ -116,10 +125,15 @@ class MainWindow : public QMainWindow
 
     const std::shared_ptr<Connection>& connection() { return m_connection; }
 
+    const ObjectPtr& worldClock() const { return m_clock; }
+
   public slots:
     void connectToServer(const QString& url = QString());
     void showObject(const ObjectPtr& object, SubWindowType flags = SubWindowType::Object);
     void showObject(const QString& id, const QString& title = "", SubWindowType flags = SubWindowType::Object);
+
+  signals:
+    void worldClockChanged();
 };
 
 #endif

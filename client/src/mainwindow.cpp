@@ -22,7 +22,6 @@
 
 #include "mainwindow.hpp"
 #include <QMenuBar>
-#include <QStatusBar>
 #include <QMdiSubWindow>
 #include <QVBoxLayout>
 #include <QToolBar>
@@ -35,9 +34,12 @@
 #include <QFileDialog>
 #include <QDateTime>
 #include <QSaveFile>
+#include <QStandardPaths>
 #include <traintastic/set/worldstate.hpp>
 #include <traintastic/utils/standardpaths.hpp>
 #include "mdiarea.hpp"
+#include "mainwindow/mainwindowstatusbar.hpp"
+#include "clock/clock.hpp"
 #include "dialog/connectdialog.hpp"
 #include "settings/settingsdialog.hpp"
 #include "dialog/worldlistdialog.hpp"
@@ -99,6 +101,7 @@ MainWindow::MainWindow(QWidget* parent) :
   QMainWindow(parent),
   m_splitter{new QSplitter(Qt::Vertical, this)},
   m_mdiArea{new MdiArea(m_splitter)},
+  m_statusBar{new MainWindowStatusBar(*this)},
   m_serverLog{nullptr},
   m_toolbar{new QToolBar(this)}
 {
@@ -276,6 +279,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_actionFullScreen->setShortcut(Qt::Key_F11);
     m_actionViewToolbar = menu->addAction(Locale::tr("qtapp.mainmenu:toolbar"), m_toolbar, &QToolBar::setVisible);
     m_actionViewToolbar->setCheckable(true);
+    m_actionClock = menu->addAction(Theme::getIcon("clock"), Locale::tr("world:clock"), this, &MainWindow::viewClockWindow);
+    m_actionClock->setCheckable(true);
     m_actionServerLog = menu->addAction(Locale::tr("qtapp.mainmenu:server_log") + "...", this, &MainWindow::toggleServerLog);
     m_actionServerLog->setCheckable(true);
     m_actionServerLog->setShortcut(Qt::Key_F12);
@@ -331,6 +336,14 @@ MainWindow::MainWindow(QWidget* parent) :
       });
     m_worldRunAction->setCheckable(true);
     m_menuWorld->addSeparator();
+    m_clockAction = m_menuWorld->addAction(Theme::getIcon("clock"), Locale::tr("world:clock"),
+      [this](bool checked)
+      {
+        if(Q_LIKELY(m_clock))
+          m_clock->setPropertyValue("freeze", !checked);
+      });
+    m_clockAction->setCheckable(true);
+    m_menuWorld->addSeparator();
     m_worldMuteMenuAction = m_menuWorld->addAction(Theme::getIcon("mute"), Locale::tr("world:mute"),
       [this](bool checked)
       {
@@ -371,7 +384,7 @@ MainWindow::MainWindow(QWidget* parent) :
     menu->addAction(Locale::tr("world:outputs") + "...", [this](){ showObject("world.outputs", Locale::tr("world:outputs")); });
     menu->addAction(Locale::tr("hardware:identifications") + "...", [this](){ showObject("world.identifications", Locale::tr("hardware:identifications")); });
     m_menuObjects->addAction(Locale::tr("world:boards") + "...", [this](){ showObject("world.boards", Locale::tr("world:boards")); });
-    m_menuObjects->addAction(Locale::tr("world:clock") + "...", [this](){ showObject("world.clock", Locale::tr("world:clock")); });
+    m_menuObjects->addAction(Theme::getIcon("clock"), Locale::tr("world:clock") + "...", [this](){ showObject("world.clock", Locale::tr("world:clock")); });
     m_menuObjects->addAction(Locale::tr("world:trains") + "...", [this](){ showObject("world.trains", Locale::tr("world:trains")); });
     m_menuObjects->addAction(Locale::tr("world:rail_vehicles") + "...", [this](){ showObject("world.rail_vehicles", Locale::tr("world:rail_vehicles")); });
     m_actionLuaScript = m_menuObjects->addAction(Theme::getIcon("lua"), Locale::tr("world:lua_scripts") + "...", [this](){ showObject("world.lua_scripts", Locale::tr("world:lua_scripts")); });
@@ -473,6 +486,8 @@ MainWindow::MainWindow(QWidget* parent) :
   m_toolbar->addAction(m_worldStopAction);
   m_toolbar->addAction(m_worldRunAction);
   m_toolbar->addSeparator();
+  m_toolbar->addAction(m_clockAction);
+  m_toolbar->addSeparator();
   m_worldMuteToolbarAction = m_toolbar->addAction(Theme::getIcon("unmute", "mute"), Locale::tr("qtapp:toggle_mute"),
     [this](bool checked)
     {
@@ -494,7 +509,7 @@ MainWindow::MainWindow(QWidget* parent) :
   m_toolbar->addAction(m_worldEditAction);
 
   QVBoxLayout* l = new QVBoxLayout();
-  l->setMargin(0);
+  l->setContentsMargins(0, 0, 0, 0);
   l->addWidget(m_toolbar);
   l->addWidget(m_mdiArea);
 
@@ -504,7 +519,7 @@ MainWindow::MainWindow(QWidget* parent) :
   m_splitter->setCollapsible(0, false);
 
   setCentralWidget(m_splitter);
-  setStatusBar(new QStatusBar());
+  setStatusBar(m_statusBar);
 
   QSettings settings;
   if(settings.contains(SETTING_GEOMETRY))
@@ -572,8 +587,40 @@ void MainWindow::worldChanged()
   if(m_world)
     m_mdiArea->closeAllSubWindows();
 
+  m_clockAction->setEnabled(false);
+  m_clockAction->setChecked(false);
+  m_clock.reset();
+  emit worldClockChanged();
+
   if(m_connection)
+  {
+    if(m_clockRequest != Connection::invalidRequestId)
+      m_connection->cancelRequest(m_clockRequest);
+
     m_world = m_connection->world();
+
+    m_clockRequest = m_connection->getObject("world.clock",
+      [this](const ObjectPtr& object, Message::ErrorCode ec)
+      {
+        m_clockRequest = Connection::invalidRequestId;
+        if(object && !ec)
+        {
+          if(auto* freeze = object->getProperty("freeze"))
+          {
+            m_clock = object;
+            emit worldClockChanged();
+            m_clockAction->setEnabled(true);
+            m_clockAction->setChecked(!freeze->toBool());
+
+            connect(freeze, &AbstractProperty::valueChangedBool, m_clockAction,
+              [this](bool value)
+              {
+                m_clockAction->setChecked(!value);
+              });
+          }
+        }
+      });
+  }
   else
     m_world.reset();
 
@@ -639,6 +686,31 @@ void MainWindow::toggleFullScreen()
     else
       showMaximized();
   }
+}
+
+void MainWindow::viewClockWindow(bool value)
+{
+  if(!value && m_clockWindow)
+  {
+    m_clockWindow->close();
+  }
+  else if(value && !m_clockWindow)
+  {
+    m_clockWindow = new QMdiSubWindow();
+    m_clockWindow->setWidget(new Clock(m_clock, m_clockWindow));
+    m_clockWindow->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_clockWindow, &QMdiSubWindow::destroyed,
+      [this](QObject* object)
+      {
+        assert(m_clockWindow == object);
+        m_clockWindow = nullptr;
+        m_actionClock->setChecked(false);
+      });
+    m_mdiArea->addSubWindow(m_clockWindow);
+    m_clockWindow->show();
+  }
+
+  m_actionClock->setChecked(m_clockWindow);
 }
 
 void MainWindow::toggleServerLog()
@@ -773,6 +845,7 @@ void MainWindow::updateActions()
   m_actionImportWorld->setEnabled(connected);
   m_actionExportWorld->setEnabled(haveWorld);
 
+  m_actionClock->setEnabled(haveWorld);
   m_actionServerLog->setEnabled(connected);
   m_menuServer->setEnabled(connected);
   m_actionServerSettings->setEnabled(connected);
