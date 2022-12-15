@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2021 Reinder Feenstra
+ * Copyright (C) 2019-2022 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -23,6 +23,7 @@
 #include "subwindow.hpp"
 #include <QVBoxLayout>
 #include <QSettings>
+#include <QIcon>
 #include <QtWaitingSpinner/waitingspinnerwidget.h>
 #include "../network/connection.hpp"
 #include "../network/object.hpp"
@@ -35,15 +36,15 @@ SubWindow::SubWindow(SubWindowType type, QWidget* parent)
   , m_type{type}
   , m_requestId{Connection::invalidRequestId}
 {
+  setWindowFlags(windowFlags() & ~Qt::WindowMaximizeButtonHint);
 }
 
 SubWindow::SubWindow(SubWindowType type, std::shared_ptr<Connection> connection, const QString& id, QWidget* parent)
-  : QMdiSubWindow(parent)
-  , m_type{type}
-  , m_connection{std::move(connection)}
-  , m_requestId{Connection::invalidRequestId}
-  , m_id{id}
+  : SubWindow(type, parent)
 {
+  m_connection = std::move(connection);
+  m_id = id;
+
   auto* spinner = new WaitingSpinnerWidget(this, true, false);
   spinner->start();
 
@@ -91,6 +92,8 @@ void SubWindow::setObject(const ObjectPtr& object)
   connect(widget(), &QWidget::windowTitleChanged, this, &SubWindow::setWindowTitle);
   if(!widget()->windowTitle().isEmpty())
     setWindowTitle(widget()->windowTitle());
+  if(!widget()->windowIcon().isNull())
+    setWindowIcon(widget()->windowIcon());
   restoreSizeFromSettings();
 }
 
