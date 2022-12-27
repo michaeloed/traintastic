@@ -1,5 +1,5 @@
 /**
- * server/src/os/windows/registry.hpp
+ * server/src/core/serialdeviceproperty.hpp
  *
  * This file is part of the traintastic source code.
  *
@@ -20,28 +20,20 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_OS_WINDOWS_REGISTRY_HPP
-#define TRAINTASTIC_SERVER_OS_WINDOWS_REGISTRY_HPP
+#ifndef TRAINTASTIC_SERVER_CORE_SERIALDEVICEPROPERTY_HPP
+#define TRAINTASTIC_SERVER_CORE_SERIALDEVICEPROPERTY_HPP
 
-#include <string>
-#include <windows.h>
+#include "property.hpp"
+#include <boost/signals2/connection.hpp>
 
-namespace Windows::Registry {
-
-bool addRun();
-
-bool getStartUpApproved(bool& enabled);
-bool setStartUpApproved(bool enabled);
-
-bool queryInfoKey(HKEY key, DWORD& numberOfValues, DWORD& maxValueNameLength);
-bool enumValue(HKEY key, DWORD index, std::string& name, std::string& value);
-bool queryValue(HKEY key, const char* name, std::string& value);
-
-inline bool queryValue(HKEY key, const std::string& name, std::string& value)
+class SerialDeviceProperty final : public Property<std::string>
 {
-  return queryValue(key, name.c_str(), value);
-}
+  private:
+    boost::signals2::connection m_serialPortListChanged;
 
-}
+  public:
+    SerialDeviceProperty(Object* object, std::string_view name, const std::string& value, PropertyFlags flags);
+    ~SerialDeviceProperty() final;
+};
 
 #endif
