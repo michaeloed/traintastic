@@ -26,6 +26,7 @@
 #include "../../../core/objectlist.hpp"
 #include "decoderlistcolumn.hpp"
 #include "../decoder.hpp"
+#include "../../../core/method.hpp"
 
 class DecoderList : public ObjectList<Decoder>
 {

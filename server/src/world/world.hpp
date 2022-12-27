@@ -53,7 +53,8 @@
 
 class WorldLoader;
 class LinkRailTile;
-class LNCVProgrammer;
+// class LNCVProgrammer;
+#include "../hardware/programming/lncv/lncvprogrammer.hpp"
 
 class World : public Object
 {

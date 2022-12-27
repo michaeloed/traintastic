@@ -31,7 +31,8 @@
 
 class IdObject;
 class Throttle;
-class ThrottleList;
+// class ThrottleList;
+#include "list/throttlelist.hpp"
 enum class ThrottleListColumn;
 
 class ThrottleController

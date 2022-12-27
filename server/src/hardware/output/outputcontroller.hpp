@@ -37,11 +37,13 @@
 class IdObject;
 class Output;
 class OutputKeyboard;
-class OutputList;
+//class OutputList;
+#include "list/outputlist.hpp"
 enum class OutputListColumn;
 
 class OutputController
 {
+    friend class OutputList;
   public:
     struct OutputMapKey
     {

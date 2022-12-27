@@ -35,14 +35,17 @@
 #endif
 
 class IdObject;
-class Input;
+// class Input;
+#include "input.hpp"
 class InputMonitor;
 
-class InputList;
+//class InputList;
+#include "list/inputlist.hpp"
 enum class InputListColumn;
 
 class InputController
 {
+    friend class Input;
   public:
     struct InputMapKey
     {

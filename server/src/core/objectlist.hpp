@@ -28,8 +28,9 @@
 #include "idobject.hpp"
 #include "subobject.hpp"
 
-template<typename T>
-class ObjectListTableModel;
+//template<typename T>
+//class ObjectListTableModel;
+#include "objectlisttablemodel.hpp"
 
 template<typename T>
 class ObjectList : public AbstractObjectList

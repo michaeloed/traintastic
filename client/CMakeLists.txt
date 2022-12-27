@@ -3,27 +3,6 @@ include(../shared/traintastic.cmake)
 project(traintastic-client VERSION ${TRAINTASTIC_VERSION} DESCRIPTION "Traintastic client")
 include(GNUInstallDirs)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC" OR
-   CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-	add_definitions(/D_CRT_SECURE_NO_DEPRECATE)
-    add_definitions(/DMCO_WIN_PLATFORM)
-    #add_definitions(/D_CRTDBG_MAP_ALLOC)
-    add_definitions(/MP)
-endif()
-
-set(TRAINTASTIC_BINARY_DIR ${CMAKE_BINARY_DIR}/../../run/bin)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${TRAINTASTIC_BINARY_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${TRAINTASTIC_BINARY_DIR})
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${TRAINTASTIC_BINARY_DIR})
-
-# Set for all build configurations (e.g. Debug, Release) one output folder
-foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
-    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG )
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${TRAINTASTIC_BINARY_DIR})
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${TRAINTASTIC_BINARY_DIR})
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${TRAINTASTIC_BINARY_DIR})
-endforeach(OUTPUTCONFIG CMAKE_CONFIGURATION_TYPES)
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -93,6 +72,8 @@ file(GLOB SOURCES
   "../shared/src/traintastic/utils/standardpaths.cpp"
   "thirdparty/QtWaitingSpinner/*.hpp"
   "thirdparty/QtWaitingSpinner/*.cpp")
+
+# list(APPEND CMAKE_PREFIX_PATH "q:/6.3.1/msvc2019_64/lib/cmake/Qt6")      
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Widgets Network Svg Xml)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets Network Svg Xml)

@@ -36,11 +36,13 @@ class IdObject;
 class Decoder;
 enum class DecoderChangeFlags;
 enum class DecoderProtocol : uint8_t;
-class DecoderList;
+//class DecoderList;
+#include "list/decoderlist.hpp"
 enum class DecoderListColumn;
 
 class DecoderController
 {
+    friend class DecoderList;
   public:
     using DecoderVector = std::vector<std::shared_ptr<Decoder>>;
 

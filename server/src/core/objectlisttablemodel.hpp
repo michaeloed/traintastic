@@ -24,7 +24,9 @@
 #define TRAINTASTIC_SERVER_CORE_OBJECTLISTTABLEMODEL_HPP
 
 #include "tablemodel.hpp"
-#include "objectlist.hpp"
+//#include "objectlist.hpp"
+template<typename T>
+class ObjectList;
 
 template<typename T>
 class ObjectListTableModel : public TableModel

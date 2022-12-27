@@ -143,8 +143,11 @@ class Property : public AbstractProperty
         changed();
       }
     }
-
+#ifdef WIN32
+    operator const T() const
+#else
     operator const T&() const
+#endif
     {
       return m_value;
     }

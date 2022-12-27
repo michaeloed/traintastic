@@ -37,14 +37,17 @@
 #endif
 
 class IdObject;
-class Identification;
+//class Identification;
+#include "identification.hpp"
 class IdentificationMonitor;
 
-class IdentificationList;
+//class IdentificationList;
+#include "list/identificationlist.hpp"
 enum class IdentificationListColumn;
 
 class IdentificationController
 {
+    friend class Identification;
   public:
     struct IdentificationMapKey
     {

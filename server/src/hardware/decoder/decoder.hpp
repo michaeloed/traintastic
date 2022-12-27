@@ -42,6 +42,7 @@ class Throttle;
 class Decoder : public IdObject
 {
   friend class DecoderFunction;
+  friend class DecoderController;
 
   private:
     bool m_worldMute;
