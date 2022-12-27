@@ -156,6 +156,8 @@ file(GLOB SOURCES
   "src/lua/*.cpp"
   "src/network/*.hpp"
   "src/network/*.cpp"
+  "src/os/*.hpp"
+  "src/os/*.cpp"
   "src/train/*.hpp"
   "src/train/*.cpp"
   "src/traintastic/*.hpp"
@@ -189,12 +191,25 @@ if(UNIX)
   list(APPEND SOURCES ${SOURCES_UNIX})
 endif()
 
+if(LINUX)
+  find_package(PkgConfig REQUIRED)
+
+  # libsystemd:
+  pkg_check_modules(LIBSYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+  if(${LIBSYSTEMD_FOUND})
+    add_definitions(-DHAS_LIBSYSTEMD)
+    list(APPEND SOURCES "src/os/linux/serialportlistimplsystemd.hpp" "src/os/linux/serialportlistimplsystemd.cpp")
+    target_link_libraries(traintastic-server PRIVATE PkgConfig::LIBSYSTEMD)
+    target_link_libraries(traintastic-server-test PRIVATE PkgConfig::LIBSYSTEMD)
+  endif()
+endif()
+
 if(WIN32)
   add_definitions(-D_WIN32_WINNT=0x0601)
   file(GLOB SOURCES_WINDOWS "src/os/windows/*.hpp" "src/os/windows/*.cpp")
   list(APPEND SOURCES ${SOURCES_WINDOWS} src/version.rc ../shared/gfx/appicon.rc)
-  target_link_libraries(traintastic-server PRIVATE bcrypt)
-  target_link_libraries(traintastic-server-test PRIVATE bcrypt)
+  target_link_libraries(traintastic-server PRIVATE bcrypt setupapi)
+  target_link_libraries(traintastic-server-test PRIVATE bcrypt setupapi)
 endif()
 
 ### COMPILER ###
