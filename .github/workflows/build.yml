@@ -165,6 +165,18 @@ jobs:
           defines: ""
           ccov: false
 
+        - name: "windows_x64_mingw"
+          os: windows-2022
+          generator: "MinGW Makefiles"
+          arch: ""
+          toolset: ""
+          target: all
+          jobs: 2
+          build_type: Release
+          build_deb: false
+          defines: "-DDISABLE_CLANG_TIDY=ON"
+          ccov: false
+
         - name: "ubuntu_20.04"
           os: ubuntu-20.04
           generator: "Unix Makefiles"
@@ -237,6 +249,18 @@ jobs:
           defines: "-DDISABLE_CLANG_TIDY=ON"
           ccov: false
 
+        - name: "macos-12"
+          os: "macos-12"
+          generator: "Unix Makefiles"
+          arch: ""
+          toolset: ""
+          target: all
+          jobs: 3
+          build_type: Release
+          build_deb: false
+          defines: "-DDISABLE_CLANG_TIDY=ON"
+          ccov: false
+
     steps:
     - uses: FranzDiebold/github-env-vars-action@v2
 
@@ -288,8 +312,17 @@ jobs:
       # Execute the build.  You can specify a specific target with "--target <NAME>"
       run: cmake --build . --config ${{matrix.config.build_type}} --target ${{matrix.config.target}} --parallel ${{matrix.config.jobs}}
 
+    # mingw only
+    #- name: Run tests (mingw)
+    #  if: matrix.config.name == 'windows_x64_mingw'
+    #  working-directory: ${{github.workspace}}/server/build
+    #  run: |
+    #    $env:PATH += ';C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
+    #    ctest --output-on-failure
+      
     # All:
     - name: Run tests
+      if: matrix.config.name != 'windows_x64_mingw'
       working-directory: ${{github.workspace}}/server/build
       run: ctest --output-on-failure
 
@@ -301,7 +334,7 @@ jobs:
 
     # Windows only:
     - name: Upload artifact
-      if: startswith(matrix.config.os, 'windows')
+      if: matrix.config.name == 'windows_x64_clang'
       uses: actions/upload-artifact@v3
       with:
         name: traintastic-server

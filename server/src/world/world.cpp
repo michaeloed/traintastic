@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -36,6 +36,7 @@
 #include "../hardware/identification/identification.hpp"
 #include "../hardware/programming/lncv/lncvprogrammer.hpp"
 #include "../log/log.hpp"
+#include "../os/localtime.hpp"
 #include "../utils/displayname.hpp"
 #include "../traintastic/traintastic.hpp"
 
@@ -45,6 +46,13 @@ constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::N
 constexpr auto inputListColumns = InputListColumn::Id | InputListColumn::Name | InputListColumn::Interface | InputListColumn::Channel | InputListColumn::Address;
 constexpr auto outputListColumns = OutputListColumn::Id | OutputListColumn::Name | OutputListColumn::Interface | OutputListColumn::Channel | OutputListColumn::Address;
 constexpr auto identificationListColumns = IdentificationListColumn::Id | IdentificationListColumn::Name | IdentificationListColumn::Interface /*| IdentificationListColumn::Channel*/ | IdentificationListColumn::Address;
+
+template<class T>
+inline static void removeAll(T& objectList)
+{
+  while(!objectList.empty())
+    objectList.remove(objectList.front());
+}
 
 std::shared_ptr<World> World::create()
 {
@@ -172,7 +180,8 @@ World::World(Private /*unused*/) :
           {
             const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             std::stringstream ss;
-            ss << std::put_time(std::localtime(&now), "_%Y%m%d_%H%M%S");
+            tm tm;
+            ss << std::put_time(localTime(&now, &tm), "_%Y%m%d_%H%M%S");
             return ss.str();
           };
 
@@ -316,6 +325,19 @@ World::World(Private /*unused*/) :
   m_interfaceItems.add(onEvent);
 
   updateEnabled();
+}
+
+World::~World()
+{
+  removeAll(*interfaces);
+  removeAll(*decoders);
+  removeAll(*inputs);
+  removeAll(*outputs);
+  removeAll(*identifications);
+  removeAll(*boards);
+  removeAll(*trains);
+  removeAll(*railVehicles);
+  removeAll(*luaScripts);
 }
 
 std::string World::getUniqueId(std::string_view prefix) const
