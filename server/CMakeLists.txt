@@ -10,7 +10,7 @@ include(code-coverage)
 configure_file(../shared/src/traintastic/version.hpp.in version.hpp)
 
 if(MSVC)
-  add_compile_options(/W3)
+  add_compile_options(/W4)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Werror)
 endif()
@@ -210,6 +210,13 @@ endif()
 
 ### LIBRARIES ###
 
+if(WIN32 AND NOT MSVC)
+  # On MinGW ws2_32.dll needs explicit linking
+  # Also mswsock.dll is needed for AcceptEx() used by Boost.Asio
+  target_link_libraries(traintastic-server PRIVATE ws2_32 mswsock)
+  target_link_libraries(traintastic-server-test PRIVATE ws2_32 mswsock)
+endif()
+
 # boost
 if(LINUX)
   find_package(Boost 1.71 REQUIRED COMPONENTS program_options)
@@ -253,16 +260,21 @@ endif()
 # libarchive
 if(WIN32)
   set(LibArchive_INCLUDE_DIRS "thirdparty/libarchive/include")
-  set(LibArchive_LIBRARIES archive)
 
-  add_custom_command(TARGET traintastic-server PRE_LINK
-    COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.def" /out:archive.lib /machine:x64)
-  add_custom_command(TARGET traintastic-server-test PRE_LINK
-    COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.def" /out:archive.lib /machine:x64)
+  if(MSVC)
+      set(LibArchive_LIBRARIES archive)
+      add_custom_command(TARGET traintastic-server PRE_LINK
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.def" /out:archive.lib /machine:x64)
+      add_custom_command(TARGET traintastic-server-test PRE_LINK
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.def" /out:archive.lib /machine:x64)
+  else()
+      # MinGW can directly link .dll without import lib
+      set(LibArchive_LIBRARIES "${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.dll")
+  endif()
 
   # copy archive.dll to build directory:
   add_custom_command(TARGET traintastic-server POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.dll" ${TRAINTASTIC_BINARY_DIR})
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.dll" .)
 elseif(APPLE)
   set(LibArchive_INCLUDE_DIRS "/usr/local/opt/libarchive/include")
   set(LibArchive_LIBRARIES "/usr/local/opt/libarchive/lib/libarchive.dylib")
@@ -278,17 +290,22 @@ target_link_libraries(traintastic-server-test PRIVATE ${LibArchive_LIBRARIES})
 if(WIN32)
   add_definitions(-DLUA_BUILD_AS_DLL)
   set(LUA_INCLUDE_DIR "thirdparty/lua5.3/include")
-  set(LUA_LIBRARIES lua53)
 
-  add_custom_command(TARGET traintastic-server PRE_LINK
-    COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
-  add_custom_command(TARGET traintastic-server-test PRE_LINK
-    COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
-  add_custom_command(TARGET traintastic-server POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" ${TRAINTASTIC_BINARY_DIR})
+  if(MSVC)
+      set(LUA_LIBRARIES lua53)
+      add_custom_command(TARGET traintastic-server PRE_LINK
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
+      add_custom_command(TARGET traintastic-server-test PRE_LINK
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
+  else()
+      # MinGW can directly link .dll without import lib
+      set(LUA_LIBRARIES "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll")
+  endif()
+
+
   # copy lua53.dll to build directory, to be able to run the tests:
   add_custom_command(TARGET traintastic-server-test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" ${TRAINTASTIC_BINARY_DIR})
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" .)
 elseif(APPLE)
   set(LUA_INCLUDE_DIR "/usr/local/opt/lua@5.3/include/lua")
   set(LUA_LIBRARIES "/usr/local/opt/lua@5.3/lib/liblua5.3.dylib")

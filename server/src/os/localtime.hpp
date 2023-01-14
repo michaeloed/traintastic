@@ -1,9 +1,9 @@
 /**
- * server/src/os/windows/serialportlistimplwin32.hpp
+ * server/src/os/localtime.hpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,26 +20,21 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_OS_WINDOWS_SERIALPORTLISTIMPLWIN32_HPP
-#define TRAINTASTIC_SERVER_OS_WINDOWS_SERIALPORTLISTIMPLWIN32_HPP
+#ifndef TRAINTASTIC_SERVER_OS_LOCALTIME_HPP
+#define TRAINTASTIC_SERVER_OS_LOCALTIME_HPP
 
-#include "../serialportlistimpl.hpp"
-#include <thread>
+#include <cstring>
+#include <ctime>
 
-namespace Windows {
-
-class SerialPortListImplWin32 final : public SerialPortListImpl
+inline tm* localTime(const time_t* time, struct tm* result)
 {
-  private:
-    std::thread m_thread;
-
-  public:
-    SerialPortListImplWin32(SerialPortList& list);
-    ~SerialPortListImplWin32() final;
-
-    std::vector<std::string> get() const final;
-};
-
+#ifdef WIN32
+  if(localtime_s(result, time) != 0)
+    memset(result, 0, sizeof(*result));
+  return result;
+#else
+  return localtime_r(time, result);
+#endif
 }
 
 #endif

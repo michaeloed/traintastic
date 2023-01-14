@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2020 Reinder Feenstra
+ * Copyright (C) 2019-2020,2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,12 +24,17 @@
 #include "../network/property.hpp"
 
 PropertyTextEdit::PropertyTextEdit(Property& property, QWidget* parent) :
-  QTextEdit(parent),
+  QPlainTextEdit(parent),
   m_property{property}
 {
   Q_ASSERT(m_property.type() == ValueType::String);
   setPlainText(m_property.toString());
-  connect(&m_property, &Property::valueChangedString, this, &PropertyTextEdit::setPlainText);
+  connect(&m_property, &Property::valueChangedString, this,
+    [this](const QString& value)
+    {
+      if(toPlainText() != value)
+        setPlainText(value);
+    });
   connect(&m_property, &Property::attributeChanged, this,
     [this](AttributeName name, const QVariant& value)
     {
