@@ -1,9 +1,9 @@
 /**
- * server/src/os/unix/signals.hpp
+ * server/src/core/isvalidobjectid.cpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,13 +20,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_OS_UNIX_SIGNALS_HPP
-#define TRAINTASTIC_SERVER_OS_UNIX_SIGNALS_HPP
+#include "isvalidobjectid.hpp"
+#include <regex>
 
-namespace Unix {
-
-void setupSignalHandlers();
-
+bool isValidObjectId(std::string_view id)
+{
+  static const std::regex re{"[a-z][a-z0-9_]*", };
+  return std::regex_match(id.begin(), id.end(), re);
 }
-
-#endif

@@ -1,6 +1,6 @@
 name: Build
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build-client:
@@ -319,7 +319,7 @@ jobs:
     #  run: |
     #    $env:PATH += ';C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
     #    ctest --output-on-failure
-      
+
     # All:
     - name: Run tests
       if: matrix.config.name != 'windows_x64_mingw'
@@ -495,6 +495,7 @@ jobs:
 
   deploy:
     name: Deploy to website
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-20.04
     needs: [package-innosetup, build-server, build-client, build-data, build-manual]
 
@@ -546,3 +547,13 @@ jobs:
           REMOTE_PORT: ${{secrets.REMOTE_PORT}}
           REMOTE_USER: ${{secrets.REMOTE_USER}}
           TARGET: ${{secrets.REMOTE_TARGET}}/traintastic/${{env.CI_REF_NAME_SLUG}}/${{github.run_number}}/
+
+  update-readme-contributors:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    name: Update contributers in README.md
+    steps:
+        - name: Update contribute list
+          uses: akhilmhdh/contributors-readme-action@v2.3.6
+          env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
