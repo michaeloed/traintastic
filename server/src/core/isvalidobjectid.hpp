@@ -1,9 +1,9 @@
 /**
- * server/src/os/unix/signals.cpp
+ * server/src/core/isvalidobjectid.hpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,34 +20,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#include "signals.hpp"
-#include <csignal>
-#include "../../log/log.hpp"
-#include "../../traintastic/traintastic.hpp"
+#ifndef TRAINTASTIC_SERVER_CORE_ISVALIDOBJECTID_HPP
+#define TRAINTASTIC_SERVER_CORE_ISVALIDOBJECTID_HPP
 
-static void signalHandler(int signum)
-{
-  switch(signum)
-  {
-    case SIGINT:
-    case SIGQUIT:
-    {
-      signal(SIGINT, SIG_DFL);
-      signal(SIGQUIT, SIG_DFL);
+#include <string_view>
 
-      Log::log(*Traintastic::instance, LogMessage::N1001_RECEIVED_SIGNAL_X, std::string_view{strsignal(signum)});
-      Traintastic::instance->exit();
-      break;
-    }
-  }
-}
+bool isValidObjectId(std::string_view id);
 
-namespace Unix {
-
-void setupSignalHandlers()
-{
-  signal(SIGINT, signalHandler);
-  signal(SIGQUIT, signalHandler);
-}
-
-}
+#endif
