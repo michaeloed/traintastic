@@ -46,7 +46,7 @@ class ObjectList : public AbstractObjectList
     std::unordered_map<Object*, boost::signals2::connection> m_propertyChanged;
     std::vector<ObjectListTableModel<T>*> m_models;
 
-    void removeMethodHandler(const std::shared_ptr<T>& object)
+    void deleteMethodHandler(const std::shared_ptr<T>& object)
     {
       if(containsObject(object))
       {
@@ -154,6 +154,12 @@ class ObjectList : public AbstractObjectList
         m_propertyChanged.erase(object.get());
         m_items.erase(it);
         rowCountChanged();
+
+        uint32_t row = std::distance(m_items.begin(), it);
+        for(auto& model : m_models)
+        {
+          model->rowRemovedHack(row);
+        }
       }
     }
 };
