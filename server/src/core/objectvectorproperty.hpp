@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021 Reinder Feenstra
+ * Copyright (C) 2021,2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -136,9 +136,30 @@ class ObjectVectorProperty : public AbstractObjectVectorProperty
       }
     }
 
+    void clearInternal()
+    {
+      if(empty())
+        return;
+
+      m_values.clear();
+      changed();
+    }
+
     void load(std::vector<std::shared_ptr<T>> values)
     {
       m_values = std::move(values);
+    }
+
+    void loadObjects(tcb::span<ObjectPtr> values) final
+    {
+      std::vector<std::shared_ptr<T>> objects;
+      objects.reserve(values.size());
+      for(const auto& object : values)
+        if(auto v = std::dynamic_pointer_cast<T>(object))
+          objects.emplace_back(v);
+        else
+          throw conversion_error();
+      m_values = std::move(objects);
     }
 };
 

@@ -22,9 +22,15 @@
 
 #include <catch2/catch.hpp>
 #include "../../hardware/interfaces.hpp"
+#include "../../../src/core/objectproperty.tpp"
+#include "../../../src/hardware/interface/interfacelist.hpp"
+#include "../../../src/hardware/decoder/list/decoderlist.hpp"
+#include "../../../src/hardware/input/list/inputlist.hpp"
+#include "../../../src/hardware/output/list/outputlist.hpp"
 #include "../../../src/world/world.hpp"
 #include "../../../src/lua/enums.hpp"
 #include "../../../src/lua/sets.hpp"
+#include "../../../src/lua/scriptlist.hpp"
 #include "../../../src/utils/toupper.hpp"
 
 TEST_CASE("Lua script: class.get() - nil", "[lua][lua-script][lua-script-class-get]")

@@ -22,7 +22,9 @@
 
 #include <catch2/catch.hpp>
 #include "../src/world/world.hpp"
+#include "../src/core/objectproperty.tpp"
 #include "../src/board/board.hpp"
+#include "../src/board/boardlist.hpp"
 #include "../src/board/tile/rail/blockrailtile.hpp"
 
 TEST_CASE("Board: Resize non existing tile", "[board][board-resize]")

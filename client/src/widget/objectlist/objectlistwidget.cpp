@@ -35,6 +35,7 @@
 #include "../alertwidget.hpp"
 #include "../../theme/theme.hpp"
 #include "../../misc/methodaction.hpp"
+#include "../../dialog/objectselectlistdialog.hpp"
 
 
 #include "../../mainwindow.hpp"
@@ -103,13 +104,13 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
       m_actionCreate = m_toolbar->addAction(Theme::getIcon("add"), method->displayName(),
         [this, method]()
         {
-          if(m_requestIdAdd != Connection::invalidRequestId)
-            m_object->connection()->cancelRequest(m_requestIdAdd);
+          if(m_requestIdCreate != Connection::invalidRequestId)
+            m_object->connection()->cancelRequest(m_requestIdCreate);
 
-          m_requestIdAdd = method->call(
+          m_requestIdCreate = method->call(
             [this](const ObjectPtr& addedObject, Message::ErrorCode /*ec*/)
             {
-              m_requestIdAdd = Connection::invalidRequestId;
+              m_requestIdCreate = Connection::invalidRequestId;
               if(addedObject)
               {
                 MainWindow::instance->showObject(addedObject);
@@ -142,13 +143,13 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
         connect(action, &QAction::triggered, this,
           [this, method, action]()
           {
-            if(m_requestIdAdd != Connection::invalidRequestId)
-              m_object->connection()->cancelRequest(m_requestIdAdd);
+            if(m_requestIdCreate != Connection::invalidRequestId)
+              m_object->connection()->cancelRequest(m_requestIdCreate);
 
-            m_requestIdAdd = method->call(action->data().toString(),
+            m_requestIdCreate = method->call(action->data().toString(),
               [this](const ObjectPtr& addedObject, Message::ErrorCode /*ec*/)
               {
-                m_requestIdAdd = Connection::invalidRequestId;
+                m_requestIdCreate = Connection::invalidRequestId;
                 if(addedObject)
                 {
                   MainWindow::instance->showObject(addedObject);
@@ -174,6 +175,25 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
       Q_ASSERT(false); // unsupported method prototype
   }
 
+  if(Method* method = m_object->getMethod("add");
+     method &&
+     method->argumentTypes().size() == 1 &&  method->argumentTypes()[0] == ValueType::Object &&
+     method->resultType() == ValueType::Invalid)
+  {
+    m_actionAdd = m_toolbar->addAction(Theme::getIcon("add"), method->displayName(),
+      [this, method]()
+      {
+        std::make_unique<ObjectSelectListDialog>(*method, this)->exec();
+      });
+    m_actionAdd->setEnabled(method->getAttributeBool(AttributeName::Enabled, true));
+    connect(method, &Method::attributeChanged, this,
+      [this](AttributeName name, QVariant value)
+      {
+        if(name == AttributeName::Enabled)
+          m_actionAdd->setEnabled(value.toBool());
+      });
+  }
+
   m_actionEdit = m_toolbar->addAction(Theme::getIcon("edit"), Locale::tr("list:edit"),
     [this]()
     {
@@ -181,6 +201,18 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
         MainWindow::instance->showObject(id);
     });
   m_actionEdit->setEnabled(false);
+
+  if(Method* method = m_object->getMethod("remove"))
+  {
+    m_actionRemove = new MethodAction(Theme::getIcon("remove"), *method,
+      [this]()
+      {
+        for(const QString& id : getSelectedObjectIds())
+          callMethod(m_actionRemove->method(), nullptr, id);
+      });
+    m_actionRemove->setForceDisabled(true);
+    m_toolbar->addAction(m_actionRemove);
+  }
 
   if(Method* method = m_object->getMethod("delete"))
   {
@@ -192,6 +224,48 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
       });
     m_actionDelete->setForceDisabled(true);
     m_toolbar->addAction(m_actionDelete);
+  }
+
+  if(Method* move = m_object->getMethod("move"))
+  {
+    m_actionMoveUp = new MethodAction(Theme::getIcon("up"), *move,
+      [this]()
+      {
+        if(auto* model = m_tableWidget->selectionModel(); model && model->hasSelection())
+        {
+          if(const auto rows = model->selectedRows(); !rows.empty())
+          {
+            const int row = rows[0].row();
+            callMethod(m_actionMoveUp->method(), nullptr, row, row - 1);
+            m_tableWidget->selectRow(row - 1);
+          }
+        }
+      });
+    //Override default method name
+    m_actionMoveUp->setText(Locale::tr("list:move_up"));
+    m_actionMoveUp->setForceDisabled(true);
+
+    m_actionMoveDown = new MethodAction(Theme::getIcon("down"), *move,
+      [this]()
+      {
+        if(auto* model = m_tableWidget->selectionModel(); model && model->hasSelection())
+        {
+          if(const auto rows = model->selectedRows(); !rows.empty())
+          {
+            const int row = rows[0].row();
+            callMethod(m_actionMoveDown->method(), nullptr, row, row + 1);
+            m_tableWidget->selectRow(row + 1);
+          }
+        }
+      });
+    //Override default method name
+    m_actionMoveDown->setText(Locale::tr("list:move_down"));
+    m_actionMoveDown->setForceDisabled(true);
+  }
+
+  if(Method* method = m_object->getMethod("reverse"))
+  {
+    m_actionReverse = new MethodAction(Theme::getIcon("reverse"), *method);
   }
 
   if(Method* method = m_object->getMethod("input_monitor"))
@@ -224,7 +298,7 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
         else
           text = value.toString();
 
-        menu->addAction(text,
+        menu->addAction(text, this,
           [this, channel=value.toUInt()]()
           {
             //cancelRequest(m_requestIdInputMonitor);
@@ -278,7 +352,7 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
         else
           text = value.toString();
 
-        menu->addAction(text,
+        menu->addAction(text, this,
           [this, channel=value.toUInt()]()
           {
             //cancelRequest(m_requestIdOutputKeyboard);
@@ -297,6 +371,21 @@ ObjectListWidget::ObjectListWidget(const ObjectPtr& object, QWidget* parent) :
       m_actionOutputKeyboardChannel = new MethodAction(Theme::getIcon("output_keyboard"), *method);
       m_actionOutputKeyboardChannel->setMenu(menu);
     }
+  }
+
+  if(m_actionMoveUp || m_actionMoveDown)
+  {
+    m_toolbar->addSeparator();
+    if(m_actionMoveUp)
+      m_toolbar->addAction(m_actionMoveUp);
+    if(m_actionMoveDown)
+      m_toolbar->addAction(m_actionMoveDown);
+  }
+
+  if(m_actionReverse)
+  {
+    m_toolbar->addSeparator();
+    m_toolbar->addAction(m_actionReverse);
   }
 
   if(m_actionInputMonitor || m_actionInputMonitorChannel || m_actionOutputKeyboard || m_actionOutputKeyboardChannel)
@@ -381,6 +470,16 @@ void ObjectListWidget::tableSelectionChanged(bool hasSelection)
 {
   if(m_actionEdit)
     m_actionEdit->setEnabled(hasSelection);
+  if(m_actionRemove)
+    m_actionRemove->setForceDisabled(!hasSelection);
   if(m_actionDelete)
     m_actionDelete->setForceDisabled(!hasSelection);
+  if(m_actionMoveUp || m_actionMoveDown)
+  {
+    const int selectedRow = m_tableWidget->selectionModel() && m_tableWidget->selectionModel()->selectedRows().length() == 1 ? m_tableWidget->selectionModel()->selectedRows()[0].row() : -1;
+    if(m_actionMoveUp)
+      m_actionMoveUp->setForceDisabled(!hasSelection || selectedRow == 0);
+    if(m_actionMoveDown)
+      m_actionMoveDown->setForceDisabled(!hasSelection || selectedRow == (m_tableWidget->model()->rowCount() - 1));
+  }
 }

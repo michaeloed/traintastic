@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2021 Reinder Feenstra
+ * Copyright (C) 2019-2021,2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,15 +21,16 @@
  */
 
 #include "railvehicle.hpp"
+#include "railvehiclelist.hpp"
 #include "railvehiclelisttablemodel.hpp"
 #include "../../world/world.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/objectproperty.tpp"
 #include "../../utils/displayname.hpp"
 
 RailVehicle::RailVehicle(World& world, std::string_view _id) :
   Vehicle(world, _id),
   decoder{this, "decoder", nullptr, PropertyFlags::ReadWrite | PropertyFlags::Store},
-  train{this, "train", nullptr, PropertyFlags::ReadOnly | PropertyFlags::Store},
   lob{*this, "lob", 0, LengthUnit::MilliMeter, PropertyFlags::ReadWrite | PropertyFlags::Store},
   speedMax{*this, "speed_max", 0, SpeedUnit::KiloMeterPerHour, PropertyFlags::ReadWrite | PropertyFlags::Store},
   weight{*this, "weight", 0, WeightUnit::Ton, PropertyFlags::ReadWrite | PropertyFlags::Store, [this](double /*value*/, WeightUnit /*unit*/){ updateTotalWeight(); }},
@@ -41,9 +42,6 @@ RailVehicle::RailVehicle(World& world, std::string_view _id) :
   Attributes::addEnabled(decoder, editable);
   Attributes::addObjectList(decoder, m_world.decoders);
   m_interfaceItems.insertBefore(decoder, notes);
-
-  Attributes::addDisplayName(train, DisplayName::Vehicle::Rail::train);
-  m_interfaceItems.insertBefore(train, notes);
 
   Attributes::addDisplayName(lob, DisplayName::Vehicle::Rail::lob);
   Attributes::addEnabled(lob, editable);
@@ -74,6 +72,13 @@ void RailVehicle::destroying()
     decoder = nullptr;
   m_world.railVehicles->removeObject(shared_ptr<RailVehicle>());
   IdObject::destroying();
+}
+
+void RailVehicle::loaded()
+{
+  Vehicle::loaded();
+
+  updateTotalWeight();
 }
 
 void RailVehicle::worldEvent(WorldState state, WorldEvent event)

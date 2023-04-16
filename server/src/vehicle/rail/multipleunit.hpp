@@ -1,9 +1,9 @@
 /**
- * server/src/vehicle/rail/freightcar.hpp
+ * server/src/vehicle/rail/multipleunit.hpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2020 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,32 +20,18 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_VEHICLE_RAIL_FREIGHTCAR_HPP
-#define TRAINTASTIC_SERVER_VEHICLE_RAIL_FREIGHTCAR_HPP
+#ifndef TRAINTASTIC_SERVER_VEHICLE_RAIL_MULTIPLEUNIT_HPP
+#define TRAINTASTIC_SERVER_VEHICLE_RAIL_MULTIPLEUNIT_HPP
 
-#include "railvehicle.hpp"
-#include "../../core/ratioproperty.hpp"
+#include "poweredrailvehicle.hpp"
 
-class FreightCar : public RailVehicle
+class MultipleUnit : public PoweredRailVehicle
 {
-  private:
-    void updateCargoLoaded();
-
-  protected:
-    void loaded() override;
-    void worldEvent(WorldState state, WorldEvent event) final;
-
-    double calcTotalWeight(WeightUnit unit) const override;
-
   public:
-    CLASS_ID("vehicle.rail.freight_car")
-    CREATE(FreightCar)
+    CLASS_ID("vehicle.rail.multiple_unit")
+    CREATE(MultipleUnit)
 
-    RatioProperty cargoLoaded;
-    WeightProperty cargoWeight;
-    WeightProperty cargoCapacity;
-
-    FreightCar(World& world, std::string_view _id);
+    MultipleUnit(World& world, std::string_view _id);
 };
 
 #endif

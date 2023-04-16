@@ -10,7 +10,9 @@ board_settings.color_scheme:light=Light
 
 board_tile.misc.push_button:color=Color
 
+board_tile.rail.block:assign_train=Assign train
 board_tile.rail.block:input_map=Sensors
+board_tile.rail.block:remove_train=Remove train
 
 board_tile.rail.direction_control:state=State
 board_tile.rail.direction_control:use_a_to_b=Use: A → B
@@ -26,6 +28,7 @@ board_tile.rail.sensor:type=Type
 
 board_tile:output_map=Outputs
 
+category:cargo=Cargo
 category:developer=Developer
 category:general=General
 category:info=Info
@@ -70,8 +73,10 @@ class_id:interface.withrottle=WiThrottle
 class_id:interface.wlanmaus=WLANmaus
 class_id:interface.xpressnet=XpressNet
 class_id:interface.z21=Z21
-class_id:vehicle.rail.freight_car=Freight car
+class_id:vehicle.rail.freight_wagon=Freight wagon
 class_id:vehicle.rail.locomotive=Locomotive
+class_id:vehicle.rail.multiple_unit=Multiple unit
+class_id:vehicle.rail.tank_wagon=Tank wagon
 
 clock:day=Day
 clock:debug_log=Debug log
@@ -227,6 +232,8 @@ length_unit:in=in
 length_unit:m=m
 length_unit:mm=mm
 length_unit:yd=yd
+
+list.train_vehicle:reverse=Reverse
 
 list:add=Add
 list:create=Create
@@ -413,6 +420,8 @@ message:N1026=Imported world successfully
 message:N2001=Simulation not supported
 message:N2002=No response from LNCV module %1 with address %2
 message:N2003=Stopped sending fast clock sync
+message:N3001=Assigned train %1 to block %2
+message:N3002=Removed train %1 from block %2
 message:N9001=Starting script
 message:N9999=%1
 message:W1001=Discovery disabled, only allowed on port %1
@@ -450,6 +459,11 @@ output_map.signal:key=Aspect
 output_map.turnout:key=Position
 
 output_map:use=Use
+
+power_unit:hp=hp
+power_unit:kw=kW
+power_unit:mw=MW
+power_unit:w=W
 
 qtapp.connect_dialog:connect=Connect
 qtapp.connect_dialog:connect_to_server=Connect to server
@@ -582,6 +596,8 @@ speed_unit:mps=m/s
 throttle_object_list:throttle=Throttle
 
 train:lob=Length over buffers
+train:override_length=Override length
+train:override_weight=Override weight
 train:speed_max=Maximum speed
 train:vehicles=Vehicles
 train:weight=Weight
@@ -596,16 +612,24 @@ turnout_position:left=Left
 turnout_position:right=Right
 turnout_position:straight=Straight
 
-vehicle.rail.freight_car:cargo_capacity=Cargo capacity
-vehicle.rail.freight_car:cargo_loaded=Cargo loaded
-vehicle.rail.freight_car:cargo_weight=Cargo weight
+vehicle.rail.freight_wagon:cargo_weight=Cargo weight
 
+vehicle.rail.tank_wagon:cargo_volume=Cargo volume
+
+vehicle.rail:cargo_capacity=Cargo capacity
+vehicle.rail:cargo_loaded=Cargo loaded
 vehicle.rail:decoder=Decoder
 vehicle.rail:lob=LOB
+vehicle.rail:power=Power
 vehicle.rail:speed_max=Maximum speed
 vehicle.rail:total_weight=Total weight
 vehicle.rail:train=Train
 vehicle.rail:weight=Weight
+
+volume_unit:gallon_uk=gal (UK)
+volume_unit:gallon_us=gal (US)
+volume_unit:l=l
+volume_unit:m3=m³
 
 weight_unit:kg=kg
 weight_unit:long_tons=Long tons
