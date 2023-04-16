@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021-2022 Reinder Feenstra
+ * Copyright (C) 2021-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,10 +21,14 @@
  */
 
 #include "ecosinterface.hpp"
+#include "../decoder/list/decoderlist.hpp"
 #include "../decoder/list/decoderlisttablemodel.hpp"
+#include "../input/list/inputlist.hpp"
+#include "../output/list/outputlist.hpp"
 #include "../protocol/ecos/iohandler/tcpiohandler.hpp"
 #include "../protocol/ecos/iohandler/simulationiohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
 #include "../../utils/displayname.hpp"
@@ -83,10 +87,10 @@ std::pair<uint32_t, uint32_t> ECoSInterface::inputAddressMinMax(uint32_t channel
   return {0, 0};
 }
 
-void ECoSInterface::inputSimulateChange(uint32_t channel, uint32_t address)
+void ECoSInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
 {
   if(m_kernel && inRange(address, outputAddressMinMax(channel)))
-    m_kernel->simulateInputChange(channel, address);
+    m_kernel->simulateInputChange(channel, address, action);
 }
 
 std::pair<uint32_t, uint32_t> ECoSInterface::outputAddressMinMax(uint32_t channel) const

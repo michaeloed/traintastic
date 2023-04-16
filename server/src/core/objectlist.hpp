@@ -69,15 +69,32 @@ class ObjectList : public AbstractObjectList
 
     void setItems(const std::vector<ObjectPtr>& items)
     {
+      m_propertyChanged.clear();
       m_items.clear();
       m_items.reserve(items.size());
       for(auto& item : items)
         if(std::shared_ptr<T> t = std::dynamic_pointer_cast<T>(item))
-          m_items.emplace_back(std::move(t));
+          addObject(std::move(t));
       rowCountChanged();
     }
 
     virtual bool isListedProperty(std::string_view name) = 0;
+
+    virtual void propertyChanged(BaseProperty& property)
+    {
+      if(!m_models.empty() && isListedProperty(property.name()))
+      {
+        ObjectPtr obj = property.object().shared_from_this();
+        const uint32_t rows = static_cast<uint32_t>(m_items.size());
+        for(uint32_t row = 0; row < rows; row++)
+          if(m_items[row] == obj)
+          {
+            for(auto& model : m_models)
+              model->propertyChanged(property, row);
+            break;
+          }
+      }
+    }
 
     void rowCountChanged()
     {
@@ -85,6 +102,14 @@ class ObjectList : public AbstractObjectList
       length.setValueInternal(static_cast<uint32_t>(size));
       for(auto& model : m_models)
         model->setRowCount(static_cast<uint32_t>(size));
+    }
+
+    void rowsChanged(uint32_t first, uint32_t last)
+    {
+      for(auto& model : m_models)
+      {
+        model->rowsChanged(first, last);
+      }
     }
 
   public:
@@ -123,25 +148,10 @@ class ObjectList : public AbstractObjectList
       return std::find(m_items.begin(), m_items.end(), object) != m_items.end();
     }
 
-    void addObject(const std::shared_ptr<T>& object)
+    void addObject(std::shared_ptr<T> object)
     {
-      m_items.push_back(object);
-      m_propertyChanged.emplace(object.get(), object->propertyChanged.connect(
-        [this](BaseProperty& property)
-        {
-          if(!m_models.empty() && isListedProperty(property.name()))
-          {
-            ObjectPtr obj = property.object().shared_from_this();
-            const uint32_t rows = static_cast<uint32_t>(m_items.size());
-            for(uint32_t row = 0; row < rows; row++)
-              if(m_items[row] == obj)
-              {
-                for(auto& model : m_models)
-                  model->propertyChanged(property, row);
-                break;
-              }
-          }
-        }));
+      m_propertyChanged.emplace(object.get(), object->propertyChanged.connect(std::bind(&ObjectList<T>::propertyChanged, this, std::placeholders::_1)));
+      m_items.emplace_back(std::move(object));
       rowCountChanged();
     }
 

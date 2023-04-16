@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -38,6 +38,7 @@ class Clock;
 class Decoder;
 enum class DecoderChangeFlags;
 class DecoderController;
+enum class SimulateInputAction;
 class InputController;
 class OutputController;
 class IdentificationController;
@@ -137,6 +138,7 @@ class Kernel
     std::thread m_thread;
     std::string m_logId;
     std::function<void()> m_onStarted;
+    std::function<void()> m_onError;
 
     std::array<SendQueue, 3> m_sendQueue;
     Priority m_sentMessagePriority;
@@ -331,6 +333,16 @@ class Kernel
     void setOnStarted(std::function<void()> callback);
 
     /**
+     * \brief Register error handler
+     *
+     * Once this handler is called the LocoNet communication it stopped.
+     *
+     * \param[in] callback Handler to call in case of an error.
+     * \note This function may not be called when the kernel is running.
+     */
+    void setOnError(std::function<void()> callback);
+
+    /**
      * @brief ...
      *
      * @param[in] callback ...
@@ -445,8 +457,9 @@ class Kernel
     /**
      * \brief Simulate input change
      * \param[in] address Input address, 1..4096
+     * \param[in] action Simulation action to perform
      */
-    void simulateInputChange(uint16_t address);
+    void simulateInputChange(uint16_t address, SimulateInputAction action);
 
     void lncvStart(uint16_t moduleId, uint16_t moduleAddress);
     void lncvRead(uint16_t lncv);

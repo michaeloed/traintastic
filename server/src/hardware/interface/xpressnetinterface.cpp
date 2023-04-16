@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,7 +21,10 @@
  */
 
 #include "xpressnetinterface.hpp"
+#include "../decoder/list/decoderlist.hpp"
 #include "../input/input.hpp"
+#include "../input/list/inputlist.hpp"
+#include "../output/list/outputlist.hpp"
 #include "../protocol/xpressnet/messages.hpp"
 #include "../protocol/xpressnet/iohandler/serialiohandler.hpp"
 #include "../protocol/xpressnet/iohandler/simulationiohandler.hpp"
@@ -29,6 +32,7 @@
 #include "../protocol/xpressnet/iohandler/rosofts88xpressnetliiohandler.hpp"
 #include "../protocol/xpressnet/iohandler/tcpiohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
 #include "../../utils/displayname.hpp"
@@ -153,10 +157,10 @@ void XpressNetInterface::decoderChanged(const Decoder& decoder, DecoderChangeFla
     m_kernel->decoderChanged(decoder, changes, functionNumber);
 }
 
-void XpressNetInterface::inputSimulateChange(uint32_t channel, uint32_t address)
+void XpressNetInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
 {
   if(m_kernel && inRange(address, outputAddressMinMax(channel)))
-    m_kernel->simulateInputChange(address);
+    m_kernel->simulateInputChange(address, action);
 }
 
 bool XpressNetInterface::setOutputValue(uint32_t channel, uint32_t address, bool value)

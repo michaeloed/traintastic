@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -120,6 +120,13 @@ void Kernel::setOnStarted(std::function<void()> callback)
   assert(isEventLoopThread());
   assert(!m_started);
   m_onStarted = std::move(callback);
+}
+
+void Kernel::setOnError(std::function<void()> callback)
+{
+  assert(isEventLoopThread());
+  assert(!m_started);
+  m_onError = std::move(callback);
 }
 
 void Kernel::setOnGlobalPowerChanged(std::function<void(bool)> callback)
@@ -1079,15 +1086,30 @@ bool Kernel::setOutput(uint16_t address, bool value)
   return true;
 }
 
-void Kernel::simulateInputChange(uint16_t address)
+void Kernel::simulateInputChange(uint16_t address, SimulateInputAction action)
 {
   assert(isEventLoopThread());
   assert(inRange(address, inputAddressMin, inputAddressMax));
   if(m_simulation)
     m_ioContext.post(
-      [this, fullAddress=address - 1]()
+      [this, fullAddress=address - 1, action]()
       {
-        receive(InputRep(fullAddress, m_inputValues[fullAddress] != TriState::True));
+        switch(action)
+        {
+            case SimulateInputAction::SetFalse:
+              if(m_inputValues[fullAddress] != TriState::False)
+                receive(InputRep(fullAddress, false));
+              break;
+
+            case SimulateInputAction::SetTrue:
+              if(m_inputValues[fullAddress] != TriState::True)
+                receive(InputRep(fullAddress, true));
+              break;
+
+            case SimulateInputAction::Toggle:
+              receive(InputRep(fullAddress, m_inputValues[fullAddress] != TriState::True));
+              break;
+        }
       });
 }
 
@@ -1228,6 +1250,12 @@ void Kernel::send(uint16_t address, Message& message, uint8_t& slot)
   if(auto addressToSlot = m_addressToSlot.find(address); addressToSlot != m_addressToSlot.end())
   {
     slot = addressToSlot->second;
+
+    if(message.opCode == OPC_LOCO_SPD &&
+        static_cast<LocoSpd&>(message).speed >= SPEED_MIN &&
+        static_cast<LocoSpd&>(message).speed == m_slots[slot].speed)
+      return; // same speed, don't send it (always send ESTOP and STOP)
+
     updateChecksum(message);
     send(message);
   }
@@ -1321,6 +1349,8 @@ void Kernel::waitingForResponseTimerExpired(const boost::system::error_code& ec)
       [this]()
       {
         Log::log(m_logId, LogMessage::E2019_TIMEOUT_NO_RESPONSE_WITHIN_X_MS, m_config.responseTimeout);
+        if(m_onError)
+          m_onError();
       });
   }
 }

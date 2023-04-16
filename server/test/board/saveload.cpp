@@ -24,7 +24,9 @@
 #include "../src/world/world.hpp"
 #include "../src/world/worldloader.hpp"
 #include "../src/world/worldsaver.hpp"
+#include "../src/core/objectproperty.tpp"
 #include "../src/board/board.hpp"
+#include "../src/board/boardlist.hpp"
 #include "../src/board/tile/rail/curve90railtile.hpp"
 
 TEST_CASE("Board: Save/Load", "[board][board-saveload]")

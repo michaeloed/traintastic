@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021-2022 Reinder Feenstra
+ * Copyright (C) 2021-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,11 +21,15 @@
  */
 
 #include "dccplusplusinterface.hpp"
+#include "../decoder/list/decoderlist.hpp"
 #include "../decoder/list/decoderlisttablemodel.hpp"
+#include "../input/list/inputlist.hpp"
+#include "../output/list/outputlist.hpp"
 #include "../protocol/dccplusplus/messages.hpp"
 #include "../protocol/dccplusplus/iohandler/serialiohandler.hpp"
 #include "../protocol/dccplusplus/iohandler/simulationiohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
 #include "../../utils/displayname.hpp"
@@ -74,10 +78,10 @@ void DCCPlusPlusInterface::decoderChanged(const Decoder& decoder, DecoderChangeF
     m_kernel->decoderChanged(decoder, changes, functionNumber);
 }
 
-void DCCPlusPlusInterface::inputSimulateChange(uint32_t channel, uint32_t address)
+void DCCPlusPlusInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
 {
   if(m_kernel && inRange(address, inputAddressMinMax(channel)))
-    m_kernel->simulateInputChange(address);
+    m_kernel->simulateInputChange(address, action);
 }
 
 std::pair<uint32_t, uint32_t> DCCPlusPlusInterface::outputAddressMinMax(uint32_t channel) const

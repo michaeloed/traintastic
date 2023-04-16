@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2020-2022 Reinder Feenstra
+ * Copyright (C) 2020-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -471,6 +471,14 @@ void TilePainter::drawTurnout(TileId id, const QRectF& r, TileRotate rotate, Tur
           drawCurve45(turnoutStateRect(r), rotate);
           break;
 
+        case TurnoutPosition::DoubleSlipStraightA:
+          drawStraight(turnoutStateRect(r), rotate);
+          break;
+
+        case TurnoutPosition::DoubleSlipStraightB:
+          drawStraight(turnoutStateRect(r), rotate - TileRotate::Deg45);
+          break;
+
         default:
           break;
       }
@@ -486,6 +494,14 @@ void TilePainter::drawTurnout(TileId id, const QRectF& r, TileRotate rotate, Tur
       setTurnoutStatePen();
       switch(position)
       {
+        case TurnoutPosition::Left:
+          drawCurve45(turnoutStateRect(r), rotate);
+          break;
+
+        case TurnoutPosition::Right:
+          drawCurve45(turnoutStateRect(r), rotate + TileRotate::Deg180);
+          break;
+
         case TurnoutPosition::Crossed:
           drawStraight(turnoutStateRect(r), rotate);
           drawStraight(turnoutStateRect(r), rotate - TileRotate::Deg45);
@@ -494,6 +510,14 @@ void TilePainter::drawTurnout(TileId id, const QRectF& r, TileRotate rotate, Tur
         case TurnoutPosition::Diverged:
           drawCurve45(turnoutStateRect(r), rotate);
           drawCurve45(turnoutStateRect(r), rotate + TileRotate::Deg180);
+          break;
+
+        case TurnoutPosition::DoubleSlipStraightA:
+          drawStraight(turnoutStateRect(r), rotate);
+          break;
+
+        case TurnoutPosition::DoubleSlipStraightB:
+          drawStraight(turnoutStateRect(r), rotate - TileRotate::Deg45);
           break;
 
         default:
@@ -586,6 +610,10 @@ void TilePainter::setBlockStateBrush(BlockState value)
 
     case BlockState::Free:
       m_painter.setBrush(m_colorScheme.blockFree);
+      break;
+
+    case BlockState::Reserved:
+      m_painter.setBrush(m_colorScheme.blockReserved);
       break;
 
     case BlockState::Unknown:

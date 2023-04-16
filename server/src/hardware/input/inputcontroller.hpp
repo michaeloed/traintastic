@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021-2022 Reinder Feenstra
+ * Copyright (C) 2021-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -42,6 +42,13 @@ class InputMonitor;
 //class InputList;
 #include "list/inputlist.hpp"
 enum class InputListColumn;
+
+enum class SimulateInputAction
+{
+  SetFalse,
+  SetTrue,
+  Toggle,
+};
 
 class InputController
 {
@@ -163,8 +170,9 @@ class InputController
      * \brief Simulate input change
      * \param[in] channel Input channel
      * \param[in] address Input address
+     * \param[in] action Simulation action to perform
      */
-    virtual void inputSimulateChange(uint32_t /*channel*/, uint32_t /*address*/) {}
+    virtual void inputSimulateChange(uint32_t /*channel*/, uint32_t /*address*/, SimulateInputAction /*action*/) {}
 };
 
 #endif

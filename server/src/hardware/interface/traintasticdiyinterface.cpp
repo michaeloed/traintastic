@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022 Reinder Feenstra
+ * Copyright (C) 2022-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,11 +21,14 @@
  */
 
 #include "traintasticdiyinterface.hpp"
+#include "../input/list/inputlist.hpp"
+#include "../output/list/outputlist.hpp"
 #include "../protocol/traintasticdiy/messages.hpp"
 #include "../protocol/traintasticdiy/iohandler/serialiohandler.hpp"
 #include "../protocol/traintasticdiy/iohandler/simulationiohandler.hpp"
 #include "../protocol/traintasticdiy/iohandler/tcpiohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
 #include "../../utils/displayname.hpp"
@@ -93,10 +96,10 @@ TraintasticDIYInterface::TraintasticDIYInterface(World& world, std::string_view 
   updateVisible();
 }
 
-void TraintasticDIYInterface::inputSimulateChange(uint32_t channel, uint32_t address)
+void TraintasticDIYInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
 {
   if(m_kernel && inRange(address, outputAddressMinMax(channel)))
-    m_kernel->simulateInputChange(address);
+    m_kernel->simulateInputChange(address, action);
 }
 
 bool TraintasticDIYInterface::setOutputValue(uint32_t channel, uint32_t address, bool value)

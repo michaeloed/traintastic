@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,8 +21,12 @@
  */
 
 #include "loconetinterface.hpp"
+#include "../decoder/list/decoderlist.hpp"
 #include "../decoder/list/decoderlisttablemodel.hpp"
 #include "../input/input.hpp"
+#include "../input/list/inputlist.hpp"
+#include "../output/list/outputlist.hpp"
+#include "../identification/list/identificationlist.hpp"
 #include "../identification/identification.hpp"
 #include "../programming/lncv/lncvprogrammer.hpp"
 #include "../protocol/loconet/iohandler/serialiohandler.hpp"
@@ -31,6 +35,7 @@
 #include "../protocol/loconet/iohandler/lbserveriohandler.hpp"
 #include "../protocol/loconet/iohandler/z21iohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
 #include "../../utils/displayname.hpp"
@@ -41,6 +46,8 @@ constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::N
 constexpr auto inputListColumns = InputListColumn::Id | InputListColumn::Name | InputListColumn::Address;
 constexpr auto outputListColumns = OutputListColumn::Id | OutputListColumn::Name | OutputListColumn::Address;
 constexpr auto identificationListColumns = IdentificationListColumn::Id | IdentificationListColumn::Name | IdentificationListColumn::Interface | IdentificationListColumn::Address;
+
+CREATE_IMPL(LocoNetInterface)
 
 LocoNetInterface::LocoNetInterface(World& world, std::string_view _id)
   : Interface(world, _id)
@@ -113,10 +120,10 @@ void LocoNetInterface::decoderChanged(const Decoder& decoder, DecoderChangeFlags
     m_kernel->decoderChanged(decoder, changes, functionNumber);
 }
 
-void LocoNetInterface::inputSimulateChange(uint32_t channel, uint32_t address)
+void LocoNetInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
 {
   if(m_kernel && inRange(address, outputAddressMinMax(channel)))
-    m_kernel->simulateInputChange(address);
+    m_kernel->simulateInputChange(address, action);
 }
 
 bool LocoNetInterface::setOutputValue(uint32_t channel, uint32_t address, bool value)
@@ -250,6 +257,12 @@ bool LocoNetInterface::setOnline(bool& value, bool simulation)
         {
           status.setValueInternal(InterfaceStatus::Online);
         });
+      m_kernel->setOnError(
+        [this]()
+        {
+          status.setValueInternal(InterfaceStatus::Error);
+          online = false; // communication no longer possible
+        });
       m_kernel->setOnGlobalPowerChanged(
         [this](bool powerOn)
         {
@@ -320,7 +333,8 @@ bool LocoNetInterface::setOnline(bool& value, bool simulation)
     m_kernel->stop();
     m_kernel.reset();
 
-    status.setValueInternal(InterfaceStatus::Offline);
+    if(status != InterfaceStatus::Error)
+      status.setValueInternal(InterfaceStatus::Offline);
   }
   return true;
 }

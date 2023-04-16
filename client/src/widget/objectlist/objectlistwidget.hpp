@@ -37,15 +37,20 @@ class ObjectListWidget : public QWidget
 
   private:
     int m_requestId;
-    int m_requestIdAdd;
+    int m_requestIdCreate;
     int m_requestIdInputMonitor;
     int m_requestIdOutputKeyboard;
     ObjectPtr m_object;
     QToolBar* m_toolbar;
     QToolButton* m_buttonCreate;
     QAction* m_actionCreate;
+    QAction* m_actionAdd = nullptr;
     QAction* m_actionEdit;
+    MethodAction* m_actionRemove = nullptr;
     MethodAction* m_actionDelete;
+    MethodAction* m_actionMoveUp = nullptr;
+    MethodAction* m_actionMoveDown = nullptr;
+    MethodAction* m_actionReverse = nullptr;
     MethodAction* m_actionInputMonitor;
     MethodAction* m_actionInputMonitorChannel;
     MethodAction* m_actionOutputKeyboard;
