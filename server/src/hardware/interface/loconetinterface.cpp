@@ -29,12 +29,16 @@
 #include "../identification/list/identificationlist.hpp"
 #include "../identification/identification.hpp"
 #include "../programming/lncv/lncvprogrammer.hpp"
+#include "../protocol/dcc/dcc.hpp"
+#include "../protocol/loconet/kernel.hpp"
+#include "../protocol/loconet/settings.hpp"
 #include "../protocol/loconet/iohandler/serialiohandler.hpp"
 #include "../protocol/loconet/iohandler/simulationiohandler.hpp"
 #include "../protocol/loconet/iohandler/tcpbinaryiohandler.hpp"
 #include "../protocol/loconet/iohandler/lbserveriohandler.hpp"
 #include "../protocol/loconet/iohandler/z21iohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/method.tpp"
 #include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
@@ -63,7 +67,7 @@ LocoNetInterface::LocoNetInterface(World& world, std::string_view _id)
   , device{this, "device", "", PropertyFlags::ReadWrite | PropertyFlags::Store}
   , baudrate{this, "baudrate", 19200, PropertyFlags::ReadWrite | PropertyFlags::Store}
   , flowControl{this, "flow_control", SerialFlowControl::None, PropertyFlags::ReadWrite | PropertyFlags::Store}
-  , hostname{this, "hostname", "192.168.1.203", PropertyFlags::ReadWrite | PropertyFlags::Store}
+  , hostname{this, "hostname", "", PropertyFlags::ReadWrite | PropertyFlags::Store}
   , port{this, "port", 5550, PropertyFlags::ReadWrite | PropertyFlags::Store}
   , loconet{this, "loconet", nullptr, PropertyFlags::ReadOnly | PropertyFlags::Store | PropertyFlags::SubObject}
 {
@@ -114,10 +118,44 @@ LocoNetInterface::LocoNetInterface(World& world, std::string_view _id)
   typeChanged();
 }
 
+bool LocoNetInterface::send(tcb::span<uint8_t> packet)
+{
+  if(m_kernel)
+    return m_kernel->send(packet);
+  return false;
+}
+
+bool LocoNetInterface::immPacket(tcb::span<uint8_t> dccPacket, uint8_t repeat)
+{
+  if(m_kernel)
+    return m_kernel->immPacket(dccPacket, repeat);
+  return false;
+}
+
+tcb::span<const DecoderProtocol> LocoNetInterface::decoderProtocols() const
+{
+  static constexpr std::array<DecoderProtocol, 2> protocols{DecoderProtocol::DCCShort, DecoderProtocol::DCCLong};
+  return tcb::span<const DecoderProtocol>{protocols.data(), protocols.size()};
+}
+
+std::pair<uint16_t, uint16_t> LocoNetInterface::decoderAddressMinMax(DecoderProtocol protocol) const
+{
+  if(protocol == DecoderProtocol::DCCLong)
+  {
+    return {DCC::addressLongStart, DCC::addressLongMax};
+  }
+  return DecoderController::decoderAddressMinMax(protocol);
+}
+
 void LocoNetInterface::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, uint32_t functionNumber)
 {
   if(m_kernel)
     m_kernel->decoderChanged(decoder, changes, functionNumber);
+}
+
+std::pair<uint32_t, uint32_t> LocoNetInterface::inputAddressMinMax(uint32_t) const
+{
+  return {LocoNet::Kernel::inputAddressMin, LocoNet::Kernel::inputAddressMax};
 }
 
 void LocoNetInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
@@ -126,12 +164,22 @@ void LocoNetInterface::inputSimulateChange(uint32_t channel, uint32_t address, S
     m_kernel->simulateInputChange(address, action);
 }
 
+std::pair<uint32_t, uint32_t> LocoNetInterface::outputAddressMinMax(uint32_t) const
+{
+  return {LocoNet::Kernel::outputAddressMin, LocoNet::Kernel::outputAddressMax};
+}
+
 bool LocoNetInterface::setOutputValue(uint32_t channel, uint32_t address, bool value)
 {
   return
-    m_kernel &&
-    inRange(address, outputAddressMinMax(channel)) &&
+      m_kernel &&
+      inRange(address, outputAddressMinMax(channel)) &&
     m_kernel->setOutput(static_cast<uint16_t>(address), value);
+}
+
+std::pair<uint32_t, uint32_t> LocoNetInterface::identificationAddressMinMax(uint32_t) const
+{
+  return {LocoNet::Kernel::identificationAddressMin, LocoNet::Kernel::identificationAddressMax};
 }
 
 void LocoNetInterface::identificationEvent(uint32_t channel, uint32_t address, IdentificationEventType eventType, uint16_t identifier, Direction direction, uint8_t category)
@@ -249,18 +297,18 @@ bool LocoNetInterface::setOnline(bool& value, bool simulation)
         }
       }
 
-      status.setValueInternal(InterfaceStatus::Initializing);
+      setState(InterfaceState::Initializing);
 
       m_kernel->setLogId(id.value());
       m_kernel->setOnStarted(
         [this]()
         {
-          status.setValueInternal(InterfaceStatus::Online);
+          setState(InterfaceState::Online);
         });
       m_kernel->setOnError(
         [this]()
         {
-          status.setValueInternal(InterfaceStatus::Error);
+          setState(InterfaceState::Error);
           online = false; // communication no longer possible
         });
       m_kernel->setOnGlobalPowerChanged(
@@ -314,7 +362,7 @@ bool LocoNetInterface::setOnline(bool& value, bool simulation)
     }
     catch(const LogMessageException& e)
     {
-      status.setValueInternal(InterfaceStatus::Offline);
+      setState(InterfaceState::Offline);
       Log::log(*this, e.message(), e.args());
       return false;
     }
@@ -333,8 +381,8 @@ bool LocoNetInterface::setOnline(bool& value, bool simulation)
     m_kernel->stop();
     m_kernel.reset();
 
-    if(status != InterfaceStatus::Error)
-      status.setValueInternal(InterfaceStatus::Offline);
+    if(status->state != InterfaceState::Error)
+      setState(InterfaceState::Offline);
   }
   return true;
 }

@@ -38,12 +38,14 @@
 #include <traintastic/enum/loconetserialinterface.hpp>
 #include <traintastic/enum/opcmultisensedirection.hpp>
 #include <traintastic/enum/outputaction.hpp>
+#include <traintastic/enum/pcapoutput.hpp>
 #include <traintastic/enum/powerunit.hpp>
 #include <traintastic/enum/ratiounit.hpp>
 #include <traintastic/enum/sensortype.hpp>
 #include <traintastic/enum/serialflowcontrol.hpp>
 #include <traintastic/enum/signalaspect.hpp>
 #include <traintastic/enum/speedunit.hpp>
+#include <traintastic/enum/trainmode.hpp>
 #include <traintastic/enum/traintasticdiyinterfacetype.hpp>
 #include <traintastic/enum/turnoutposition.hpp>
 #include <traintastic/enum/volumeunit.hpp>
@@ -97,12 +99,14 @@ QString translateEnum(const QString& enumName, qint64 value)
   TRANSLATE_ENUM(LocoNetSerialInterface)
   TRANSLATE_ENUM(OPCMultiSenseDirection)
   TRANSLATE_ENUM(OutputAction)
+  TRANSLATE_ENUM(PCAPOutput)
   TRANSLATE_ENUM(PowerUnit)
   TRANSLATE_ENUM(RatioUnit)
   TRANSLATE_ENUM(SensorType)
   TRANSLATE_ENUM(SerialFlowControl)
   TRANSLATE_ENUM(SignalAspect)
   TRANSLATE_ENUM(SpeedUnit)
+  TRANSLATE_ENUM(TrainMode)
   TRANSLATE_ENUM(TraintasticDIYInterfaceType)
   TRANSLATE_ENUM(TurnoutPosition)
   TRANSLATE_ENUM(VolumeUnit)

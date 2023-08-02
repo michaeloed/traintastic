@@ -1,9 +1,9 @@
 /**
- * shared/src/enum/interfacestatus.hpp
+ * server/src/core/stateobject.hpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021-2022 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,26 +20,34 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SHARED_TRAINTASTIC_ENUM_INTERFACESTATUS_HPP
-#define TRAINTASTIC_SHARED_TRAINTASTIC_ENUM_INTERFACESTATUS_HPP
+#ifndef TRAINTASTIC_SERVER_CORE_STATEOBJECT_HPP
+#define TRAINTASTIC_SERVER_CORE_STATEOBJECT_HPP
 
-#include <cstdint>
-#include "enum.hpp"
+#include "object.hpp"
 
-enum class InterfaceStatus : uint8_t
+class World;
+
+//! \brief Object with storable state information
+//! Properties can't have the \ref PropertyFlags::Store flag set.
+//! As this object only contains state information the world should load without restoring any state data,
+//! including these state object's.
+class StateObject : public Object
 {
-  Offline = 0,
-  Initializing = 1,
-  Online = 2,
-  Error = 255,
+private:
+  std::string m_id;
+
+protected:
+  void save(WorldSaver& saver, nlohmann::json& data, nlohmann::json& state) const override;
+
+public:
+  static void addToWorld(World& world, StateObject& object);
+
+  StateObject(std::string id);
+
+  std::string getObjectId() const final
+  {
+    return m_id;
+  }
 };
-
-TRAINTASTIC_ENUM(InterfaceStatus, "interface_status", 4,
-{
-  {InterfaceStatus::Offline, "offline"},
-  {InterfaceStatus::Initializing, "initializing"},
-  {InterfaceStatus::Online, "online"},
-  {InterfaceStatus::Error, "error"},
-});
 
 #endif

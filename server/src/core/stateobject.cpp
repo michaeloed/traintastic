@@ -1,9 +1,9 @@
 /**
- * server/src/enum/interfacestatus.hpp
+ * server/src/core/stateobject.cpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,16 +20,27 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_ENUM_INTERFACESTATUS_HPP
-#define TRAINTASTIC_SERVER_ENUM_INTERFACESTATUS_HPP
+#include "stateobject.hpp"
+#include "../world/world.hpp"
 
-#include <traintastic/enum/interfacestatus.hpp>
+void StateObject::addToWorld(World& world, StateObject& object)
+{
+  world.m_objects.emplace(object.getObjectId(), object.weak_from_this());
+}
 
-inline constexpr std::array<InterfaceStatus, 4> interfaceStatusValues{{
-  InterfaceStatus::Offline,
-  InterfaceStatus::Initializing,
-  InterfaceStatus::Online,
-  InterfaceStatus::Error,
-}};
+StateObject::StateObject(std::string id)
+  : m_id{std::move(id)}
+{
+  assert(!m_id.empty());
+}
 
+void StateObject::save(WorldSaver& saver, nlohmann::json& data, nlohmann::json& state) const
+{
+#ifndef NDEBUG
+  for(const auto& it : m_interfaceItems)
+    if(const auto* p = dynamic_cast<const BaseProperty*>(&it.second))
+      assert(!p->isStoreable()); // A StateObject may no have storable properties
 #endif
+  Object::save(saver, data, state);
+  data["id"] = m_id;
+}

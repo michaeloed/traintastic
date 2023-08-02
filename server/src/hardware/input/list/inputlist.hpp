@@ -26,10 +26,9 @@
 #include "../../../core/objectlist.hpp"
 #include "inputlistcolumn.hpp"
 #include "../../../core/method.hpp"
-#include "../monitor/inputmonitor.hpp"
 
-//class Input;
-#include <hardware/input/input.hpp>
+class Input;
+class InputMonitor;
 
 class InputList : public ObjectList<Input>
 {

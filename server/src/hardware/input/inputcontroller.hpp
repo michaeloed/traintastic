@@ -29,6 +29,7 @@
 #include <memory>
 #include "../../core/objectproperty.hpp"
 #include "../../enum/tristate.hpp"
+#include "../../enum/simulateinputaction.hpp"
 
 #ifdef interface
   #undef interface // interface is defined in combaseapi.h
@@ -42,13 +43,6 @@ class InputMonitor;
 //class InputList;
 #include "../../hardware/input/list/inputlist.hpp"
 enum class InputListColumn;
-
-enum class SimulateInputAction
-{
-  SetFalse,
-  SetTrue,
-  Toggle,
-};
 
 class InputController
 {
