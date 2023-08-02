@@ -23,6 +23,7 @@
 #ifndef TRAINTASTIC_SERVER_HARDWARE_INPUT_INPUT_HPP
 #define TRAINTASTIC_SERVER_HARDWARE_INPUT_INPUT_HPP
 
+#include "inputcontroller.hpp"
 #include "../../core/idobject.hpp"
 #include "../../core/objectproperty.hpp"
 #include "../../core/objectvectorproperty.hpp"

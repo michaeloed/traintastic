@@ -35,10 +35,13 @@
 #include <traintastic/enum/worldevent.hpp>
 #include "../enum/worldscale.hpp"
 #include <traintastic/set/worldstate.hpp>
+#include "../hardware/programming/lncv/lncvprogrammer.hpp"
+#include "../hardware/input/list/inputlist.hpp"
 
+class DecoderController;
 class WorldLoader;
 class LinkRailTile;
-class LNCVProgrammer;
+//class LNCVProgrammer;
 class DecoderController;
 class InputController;
 class OutputController;
@@ -46,7 +49,7 @@ class IdentificationController;
 class LNCVProgrammingController;
 class InterfaceList;
 class DecoderList;
-class InputList;
+//class InputList;
 class OutputList;
 class IdentificationList;
 class BoardList;

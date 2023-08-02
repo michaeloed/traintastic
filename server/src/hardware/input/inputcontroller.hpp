@@ -40,7 +40,7 @@ class IdObject;
 class InputMonitor;
 
 //class InputList;
-#include "list/inputlist.hpp"
+#include "../../hardware/input/list/inputlist.hpp"
 enum class InputListColumn;
 
 enum class SimulateInputAction
@@ -53,6 +53,7 @@ enum class SimulateInputAction
 class InputController
 {
     friend class Input;
+    friend class InputList;
   public:
     struct InputMapKey
     {

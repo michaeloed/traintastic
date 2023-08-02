@@ -33,10 +33,12 @@
 #endif
 
 class IdObject;
-class Decoder;
+//class Decoder;
+
 enum class DecoderChangeFlags;
 enum class DecoderProtocol : uint8_t;
 //class DecoderList;
+#include "../../hardware/decoder/decoder.hpp"
 #include "list/decoderlist.hpp"
 enum class DecoderListColumn;
 

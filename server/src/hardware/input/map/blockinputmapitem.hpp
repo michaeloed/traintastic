@@ -25,7 +25,7 @@
 
 #include "inputmapitem.hpp"
 #include "../../../core/objectproperty.hpp"
-#include "../input.hpp"
+#include <hardware/input/input.hpp>
 #include "../../../enum/sensortype.hpp"
 #include "../../../enum/sensorstate.hpp"
 

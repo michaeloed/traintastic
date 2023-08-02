@@ -28,7 +28,8 @@
 #include "../../../core/method.hpp"
 #include "../monitor/inputmonitor.hpp"
 
-class Input;
+//class Input;
+#include <hardware/input/input.hpp>
 
 class InputList : public ObjectList<Input>
 {
