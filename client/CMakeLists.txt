@@ -79,9 +79,9 @@ file(GLOB SOURCES
   "thirdparty/QtWaitingSpinner/*.hpp"
   "thirdparty/QtWaitingSpinner/*.cpp")
 
-# list(APPEND CMAKE_PREFIX_PATH "q:/6.3.1/msvc2019_64/lib/cmake/Qt6")      
-
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Widgets Network Svg Xml)
+# list(APPEND CMAKE_PREFIX_PATH "q:/6.3.1/msvc2019_64/lib/cmake/Qt6")
+list(APPEND CMAKE_PREFIX_PATH "q:/5.15.2/mingw81_64/lib/cmake/Qt5")
+find_package(QT NAMES Qt5 REQUIRED COMPONENTS Core Widgets Network Svg Xml)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets Network Svg Xml)
 message(STATUS "Found Qt ${QT_VERSION}")
 
