@@ -32,8 +32,9 @@
 
 namespace Z21 {
 
-ClientKernel::ClientKernel(const ClientConfig& config, bool simulation)
-  : m_simulation{simulation}
+ClientKernel::ClientKernel(std::string logId_, const ClientConfig& config, bool simulation)
+  : Kernel(std::move(logId_))
+  , m_simulation{simulation}
   , m_keepAliveTimer(m_ioContext)
   , m_config{config}
 {
@@ -54,7 +55,7 @@ void ClientKernel::receive(const Message& message)
     EventLoop::call(
       [this, msg=toString(message)]()
       {
-        Log::log(m_logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId, LogMessage::D2002_RX_X, msg);
       });
 
   switch(message.header())
@@ -229,7 +230,7 @@ void ClientKernel::receive(const Message& message)
 
         if(m_broadcastFlags != requiredBroadcastFlags)
         {
-            Log::log(m_logId, LogMessage::W2019_Z21_BROADCAST_FLAG_MISMATCH);
+            Log::log(logId, LogMessage::W2019_Z21_BROADCAST_FLAG_MISMATCH);
         }
       }
       break;
@@ -334,7 +335,7 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
     {
       case 14:
       {
-        const uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, 14);
+        const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 14);
         cmd.db0 = 0x10;
         if(decoder.emergencyStop)
           cmd.speedAndDirection = 0x01;
@@ -344,7 +345,7 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
       }
       case 28:
       {
-        uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, 28);
+        uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 28);
         cmd.db0 = 0x12;
         if(decoder.emergencyStop)
           cmd.speedAndDirection = 0x01;
@@ -359,7 +360,7 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
       case 128:
       default:
       {
-        const uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, 126);
+        const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 126);
         cmd.db0 = 0x13;
         if(decoder.emergencyStop)
           cmd.speedAndDirection = 0x01;
@@ -520,7 +521,7 @@ void ClientKernel::send(const Message& message)
       EventLoop::call(
         [this, msg=toString(message)]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else
@@ -531,7 +532,7 @@ void ClientKernel::startKeepAliveTimer()
 {
   if(m_broadcastFlags == BroadcastFlags::None && m_broadcastFlagsRetryCount == maxBroadcastFlagsRetryCount)
   {
-    Log::log(m_logId, LogMessage::W2019_Z21_BROADCAST_FLAG_MISMATCH);
+    Log::log(logId, LogMessage::W2019_Z21_BROADCAST_FLAG_MISMATCH);
     m_broadcastFlagsRetryCount++; //Log only once
   }
 

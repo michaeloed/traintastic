@@ -32,6 +32,7 @@
 #include "../../../core/eventloop.hpp"
 #include "../../../core/objectproperty.tpp"
 #include "../../../log/log.hpp"
+#include "../../../log/logmessageexception.hpp"
 #include "../../../world/world.hpp"
 
 namespace TraintasticDIY {
@@ -70,17 +71,14 @@ constexpr TriState toTriState(OutputState value)
   return TriState::Undefined;
 }
 
-Kernel::Kernel(World& world, const Config& config, bool simulation)
-  : m_world{world}
-  , m_ioContext{1}
+Kernel::Kernel(std::string logId_, World& world, const Config& config, bool simulation)
+  : KernelBase(std::move(logId_))
+  , m_world{world}
   , m_simulation{simulation}
   , m_heartbeatTimeout{m_ioContext}
   , m_inputController{nullptr}
   , m_outputController{nullptr}
   , m_config{config}
-#ifndef NDEBUG
-  , m_started{false}
-#endif
 {
 }
 
@@ -119,19 +117,27 @@ void Kernel::start()
   m_ioContext.post(
     [this]()
     {
-      m_ioHandler->start();
+      try
+      {
+        m_ioHandler->start();
+      }
+      catch(const LogMessageException& e)
+      {
+        EventLoop::call(
+          [this, e]()
+          {
+            Log::log(logId, e.message(), e.args());
+            error();
+          });
+        return;
+      }
 
       send(GetInfo());
       send(GetFeatures());
 
       restartHeartbeatTimeout();
 
-      if(m_onStarted)
-        EventLoop::call(
-          [this]()
-          {
-            m_onStarted();
-          });
+      started();
     });
 
 #ifndef NDEBUG
@@ -171,7 +177,7 @@ void Kernel::receive(const Message& message)
     EventLoop::call(
       [this, msg=toString(message)]()
       {
-        Log::log(m_logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId, LogMessage::D2002_RX_X, msg);
       });
 
   restartHeartbeatTimeout();
@@ -201,7 +207,7 @@ void Kernel::receive(const Message& message)
               if(state == InputState::Invalid)
               {
                 if(m_inputController->inputMap().count({InputController::defaultInputChannel, address}) != 0)
-                  Log::log(m_logId, LogMessage::W2004_INPUT_ADDRESS_X_IS_INVALID, address);
+                  Log::log(logId, LogMessage::W2004_INPUT_ADDRESS_X_IS_INVALID, address);
               }
               else
                 m_inputController->updateInputValue(InputController::defaultInputChannel, address, toTriState(state));
@@ -230,7 +236,7 @@ void Kernel::receive(const Message& message)
               if(state == OutputState::Invalid)
               {
                 if(m_outputController->outputMap().count({OutputController::defaultOutputChannel, address}) != 0)
-                  Log::log(m_logId, LogMessage::W2005_OUTPUT_ADDRESS_X_IS_INVALID, address);
+                  Log::log(logId, LogMessage::W2005_OUTPUT_ADDRESS_X_IS_INVALID, address);
               }
               else
                 m_outputController->updateOutputValue(OutputController::defaultOutputChannel, address, toTriState(state));
@@ -380,7 +386,7 @@ void Kernel::receive(const Message& message)
       EventLoop::call(
         [this, text=std::string(info.text())]()
         {
-          Log::log(m_logId, LogMessage::I2005_X, text);
+          Log::log(logId, LogMessage::I2005_X, text);
         });
       break;
     }
@@ -448,7 +454,7 @@ void Kernel::send(const Message& message)
       EventLoop::call(
         [this, msg=toString(message)]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else

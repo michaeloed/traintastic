@@ -60,6 +60,7 @@
 #include "../hardware/interface/ecosinterface.hpp"
 #include "../hardware/interface/hsi88.hpp"
 #include "../hardware/interface/loconetinterface.hpp"
+#include "../hardware/interface/marklincaninterface.hpp"
 #include "../hardware/interface/traintasticdiyinterface.hpp"
 #include "../hardware/interface/withrottleinterface.hpp"
 #include "../hardware/interface/wlanmausinterface.hpp"
@@ -83,6 +84,9 @@
 #include "../hardware/output/map/turnoutoutputmap.hpp"
 #include "../hardware/output/map/turnoutoutputmapitem.hpp"
 #include "../hardware/output/map/signaloutputmapitem.hpp"
+
+#include "../hardware/identification/identification.hpp"
+#include "../hardware/identification/list/identificationlist.hpp"
 
 #include "../vehicle/rail/railvehiclelist.hpp"
 #include "../vehicle/rail/locomotive.hpp"
@@ -170,15 +174,16 @@ void Class::registerValues(lua_State* L)
   registerValue<Clock>(L, "CLOCK");
 
   // hardware - interface:
-  registerValue<DCCPlusPlusInterface>(L, "DCCPLUSPLUS");
-  registerValue<ECoSInterface>(L, "ECOS");
-  registerValue<HSI88Interface>(L, "HSI88");
-  registerValue<LocoNetInterface>(L, "LOCONET");
-  registerValue<TraintasticDIYInterface>(L, "TRAINTASTIC_DIY");
-  registerValue<XpressNetInterface>(L, "XPRESSNET");
-  registerValue<WiThrottleInterface>(L, "WITHROTTLE");
-  registerValue<WlanMausInterface>(L, "WLANMAUS");
-  registerValue<Z21Interface>(L, "Z21");
+  registerValue<DCCPlusPlusInterface>(L, "DCCPLUSPLUS_INTERFACE");
+  registerValue<ECoSInterface>(L, "ECOS_INTERFACE");
+  registerValue<HSI88Interface>(L, "HSI88_INTERFACE");
+  registerValue<LocoNetInterface>(L, "LOCONET_INTERFACE");
+  registerValue<MarklinCANInterface>(L, "MARKLIN_CAN_INTERFACE");
+  registerValue<TraintasticDIYInterface>(L, "TRAINTASTIC_DIY_INTERFACE");
+  registerValue<XpressNetInterface>(L, "XPRESSNET_INTERFACE");
+  registerValue<WiThrottleInterface>(L, "WITHROTTLE_INTERFACE");
+  registerValue<WlanMausInterface>(L, "WLANMAUS_INTERFACE");
+  registerValue<Z21Interface>(L, "Z21_INTERFACE");
   registerValue<InterfaceStatus>(L, "INTERFACE_STATUS");
 
   registerValue<DecoderFunction>(L, "DECODER_FUNCTION");
@@ -191,6 +196,10 @@ void Class::registerValues(lua_State* L)
 
   registerValue<Output>(L, "OUTPUT");
   registerValue<OutputList>(L, "OUTPUT_LIST");
+
+  // hardware - identification:
+  registerValue<Identification>(L, "IDENTIFICATION");
+  registerValue<IdentificationList>(L, "IDENTIFICATION_LIST");
 
   registerValue<RailVehicleList>(L, "RAIL_VEHICLE_LIST");
   registerValue<Locomotive>(L, "LOCOMOTIVE");

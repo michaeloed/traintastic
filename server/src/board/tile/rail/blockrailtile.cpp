@@ -120,8 +120,7 @@ BlockRailTile::BlockRailTile(World& world, std::string_view _id) :
           if(it == trains.end()) /*[[unlikely]]*/
             return; // can't remove a train that isn't in the block
 
-          oldTrain->blocks.removeInternal(*it);
-          trains.removeInternal(*it);
+          (**it).destroy();
 
           updateTrainMethodEnabled();
           if(state == BlockState::Reserved)
@@ -217,6 +216,58 @@ void BlockRailTile::inputItemValueChanged(BlockInputMapItem& item)
   updateState();
 }
 
+void BlockRailTile::identificationEvent(BlockInputMapItem& /*item*/, IdentificationEventType eventType, uint16_t identifier, Direction direction, uint8_t /*category*/)
+{
+  const auto self = shared_ptr<BlockRailTile>();
+  BlockTrainDirection blockDirection = BlockTrainDirection::Unknown;
+  if(direction != Direction::Unknown)
+    blockDirection = (direction == Direction::Reverse) ? BlockTrainDirection::TowardsB : BlockTrainDirection::TowardsA;
+
+  if(trains.empty())
+  {
+    switch(eventType)
+    {
+      case IdentificationEventType::Absent:
+        break; // nothing to do...its gone
+
+      case IdentificationEventType::Present:
+        //!< \todo assign train (if allowed and possible)
+        trains.appendInternal(TrainBlockStatus::create(*this, std::string("#").append(std::to_string(identifier)), blockDirection));
+        if(state == BlockState::Free || state == BlockState::Unknown)
+          updateState();
+        break;
+
+      case IdentificationEventType::Seen:
+        break;
+    }
+  }
+  else
+  {
+    switch(eventType)
+    {
+      case IdentificationEventType::Absent:
+      {
+        const auto identification = std::string("#").append(std::to_string(identifier));
+        for(const auto& train : trains)
+        {
+          if(train->identification.value() == identification)
+          {
+            train->destroy();
+            updateState();
+            break;
+          }
+        }
+        break;
+      }
+      case IdentificationEventType::Present:
+        break;
+
+      case IdentificationEventType::Seen:
+        break;
+    }
+  }
+}
+
 void BlockRailTile::updateState()
 {
   if(!inputMap->items.empty())
@@ -283,7 +334,8 @@ void BlockRailTile::destroying()
 {
   const auto self = shared_ptr<BlockRailTile>();
   for(const auto& status : *trains)
-    status->train->blocks.removeInternal(status);
+    if(status->train)
+      status->train->blocks.removeInternal(status);
 
   RailTile::destroying();
 }

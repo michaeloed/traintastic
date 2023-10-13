@@ -67,7 +67,7 @@
 
 using nlohmann::json;
 
-constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::Name | DecoderListColumn::Interface | DecoderListColumn::Address;
+constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::Name | DecoderListColumn::Interface | DecoderListColumn::Protocol | DecoderListColumn::Address;
 constexpr auto inputListColumns = InputListColumn::Id | InputListColumn::Name | InputListColumn::Interface | InputListColumn::Channel | InputListColumn::Address;
 constexpr auto outputListColumns = OutputListColumn::Id | OutputListColumn::Name | OutputListColumn::Interface | OutputListColumn::Channel | OutputListColumn::Address;
 constexpr auto identificationListColumns = IdentificationListColumn::Id | IdentificationListColumn::Name | IdentificationListColumn::Interface /*| IdentificationListColumn::Channel*/ | IdentificationListColumn::Address;
@@ -76,7 +76,17 @@ template<class T>
 inline static void deleteAll(T& objectList)
 {
   while(!objectList.empty())
+  {
+    if constexpr(std::is_same_v<T, TrainList>)
+    {
+      if(objectList.front()->active)
+      {
+        objectList.front()->emergencyStop = true;
+        objectList.front()->active = false;
+      }
+    }
     objectList.delete_(objectList.front());
+  }
 }
 
 std::shared_ptr<World> World::create()

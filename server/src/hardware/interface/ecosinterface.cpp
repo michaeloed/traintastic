@@ -39,7 +39,7 @@
 #include "../../world/world.hpp"
 #include "../../world/worldloader.hpp"
 
-constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::Name | DecoderListColumn::Address;
+constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::Name | DecoderListColumn::Protocol | DecoderListColumn::Address;
 constexpr auto inputListColumns = InputListColumn::Id | InputListColumn::Name | InputListColumn::Channel | InputListColumn::Address;
 constexpr auto outputListColumns = OutputListColumn::Id | OutputListColumn::Name | OutputListColumn::Channel | OutputListColumn::Address;
 
@@ -156,17 +156,22 @@ bool ECoSInterface::setOnline(bool& value, bool simulation)
     try
     {
       if(simulation)
-        m_kernel = ECoS::Kernel::create<ECoS::SimulationIOHandler>(ecos->config(), m_simulation);
+        m_kernel = ECoS::Kernel::create<ECoS::SimulationIOHandler>(id.value(), ecos->config(), m_simulation);
       else
-        m_kernel = ECoS::Kernel::create<ECoS::TCPIOHandler>(ecos->config(), hostname.value());
+        m_kernel = ECoS::Kernel::create<ECoS::TCPIOHandler>(id.value(), ecos->config(), hostname.value());
 
       setState(InterfaceState::Initializing);
 
-      m_kernel->setLogId(id.value());
       m_kernel->setOnStarted(
         [this]()
         {
           setState(InterfaceState::Online);
+        });
+      m_kernel->setOnError(
+        [this]()
+        {
+          setState(InterfaceState::Error);
+          online = false; // communication no longer possible
         });
       m_kernel->setOnEmergencyStop(
         [this]()
@@ -326,10 +331,4 @@ void ECoSInterface::worldEvent(WorldState state, WorldEvent event)
         break;
     }
   }
-}
-
-void ECoSInterface::idChanged(const std::string& newId)
-{
-  if(m_kernel)
-    m_kernel->setLogId(newId);
 }

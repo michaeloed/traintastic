@@ -42,6 +42,7 @@
 #include "../../../utils/tohex.hpp"
 #include "../../../core/eventloop.hpp"
 #include "../../../log/log.hpp"
+#include "../../../log/logmessageexception.hpp"
 
 #define ASSERT_IS_KERNEL_THREAD assert(std::this_thread::get_id() == m_thread.get_id())
 
@@ -71,16 +72,13 @@ static constexpr DecoderProtocol toDecoderProtocol(LocomotiveProtocol locomotive
   return DecoderProtocol::None;
 }
 
-Kernel::Kernel(const Config& config, bool simulation)
-  : m_ioContext{1}
+Kernel::Kernel(std::string logId_, const Config& config, bool simulation)
+  : KernelBase(std::move(logId_))
   , m_simulation{simulation}
   , m_decoderController{nullptr}
   , m_inputController{nullptr}
   , m_outputController{nullptr}
   , m_config{config}
-#ifndef NDEBUG
-  , m_started{false}
-#endif
 {
 }
 
@@ -91,12 +89,6 @@ void Kernel::setConfig(const Config& config)
     {
       m_config = newConfig;
     });
-}
-
-void Kernel::setOnStarted(std::function<void()> callback)
-{
-  assert(!m_started);
-  m_onStarted = std::move(callback);
 }
 
 void Kernel::setOnEmergencyStop(std::function<void()> callback)
@@ -146,19 +138,27 @@ void Kernel::start()
   m_ioContext.post(
     [this]()
     {
-      m_ioHandler->start();
+      try
+      {
+        m_ioHandler->start();
+      }
+      catch(const LogMessageException& e)
+      {
+        EventLoop::call(
+          [this, e]()
+          {
+            Log::log(logId, e.message(), e.args());
+            error();
+          });
+        return;
+      }
 
       m_objects.add(std::make_unique<ECoS>(*this));
       m_objects.add(std::make_unique<LocomotiveManager>(*this));
       m_objects.add(std::make_unique<SwitchManager>(*this));
       m_objects.add(std::make_unique<FeedbackManager>(*this));
 
-      if(m_onStarted)
-        EventLoop::call(
-          [this]()
-          {
-            m_onStarted();
-          });
+      started();
     });
 
 #ifndef NDEBUG
@@ -217,7 +217,7 @@ void Kernel::receive(std::string_view message)
   {
     std::string msg{rtrim(message, {'\r', '\n'})};
     std::replace_if(msg.begin(), msg.end(), [](char c){ return c == '\r' || c == '\n'; }, ';');
-    EventLoop::call([this, msg](){ Log::log(m_logId, LogMessage::D2002_RX_X, msg); });
+    EventLoop::call([this, msg](){ Log::log(logId, LogMessage::D2002_RX_X, msg); });
   }
 
   if(Reply reply; parseReply(message, reply))
@@ -233,7 +233,7 @@ void Kernel::receive(std::string_view message)
       it->second->receiveEvent(event);
   }
   else
-  {}//  EventLoop::call([this]() { Log::log(m_logId, LogMessage::E2018_ParseError); });
+  {}//  EventLoop::call([this]() { Log::log(logId, LogMessage::E2018_ParseError); });
 }
 
 ECoS& Kernel::ecos()
@@ -536,7 +536,7 @@ void Kernel::send(std::string_view message)
       EventLoop::call(
         [this, msg=std::string(rtrim(message, '\n'))]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else

@@ -23,10 +23,9 @@
 #ifndef TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_DCCPLUSPLUS_KERNEL_HPP
 #define TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_DCCPLUSPLUS_KERNEL_HPP
 
+#include "../kernelbase.hpp"
 #include <array>
-#include <thread>
 #include <unordered_map>
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <traintastic/enum/tristate.hpp>
 #include "config.hpp"
@@ -43,7 +42,7 @@ namespace DCCPlusPlus {
 
 struct Message;
 
-class Kernel
+class Kernel : public ::KernelBase
 {
   public:
     static constexpr uint32_t idMin = 0;
@@ -71,13 +70,9 @@ class Kernel
     };
 
   private:
-    boost::asio::io_context m_ioContext;
     std::unique_ptr<IOHandler> m_ioHandler;
     const bool m_simulation;
-    std::thread m_thread;
-    std::string m_logId;
     boost::asio::steady_timer m_startupDelayTimer;
-    std::function<void()> m_onStarted;
 
     TriState m_powerOn;
     TriState m_emergencyStop;
@@ -91,11 +86,8 @@ class Kernel
     OutputController* m_outputController;
 
     Config m_config;
-#ifndef NDEBUG
-    bool m_started;
-#endif
 
-    Kernel(const Config& config, bool simulation);
+    Kernel(std::string logId_, const Config& config, bool simulation);
 
     void setIOHandler(std::unique_ptr<IOHandler> handler);
 
@@ -117,13 +109,6 @@ class Kernel
     Kernel& operator =(const Kernel&) = delete;
 
     /**
-     * @brief IO context for DCC++ kernel and IO handler
-     *
-     * @return The IO context
-     */
-    boost::asio::io_context& ioContext() { return m_ioContext; }
-
-    /**
      * @brief Create kernel and IO handler
      *
      * @param[in] config DCC++ configuration
@@ -131,10 +116,10 @@ class Kernel
      * @return The kernel instance
      */
     template<class IOHandlerType, class... Args>
-    static std::unique_ptr<Kernel> create(const Config& config, Args... args)
+    static std::unique_ptr<Kernel> create(std::string logId_, const Config& config, Args... args)
     {
       static_assert(std::is_base_of_v<IOHandler, IOHandlerType>);
-      std::unique_ptr<Kernel> kernel{new Kernel(config, isSimulation<IOHandlerType>())};
+      std::unique_ptr<Kernel> kernel{new Kernel(std::move(logId_), config, isSimulation<IOHandlerType>())};
       kernel->setIOHandler(std::make_unique<IOHandlerType>(*kernel, std::forward<Args>(args)...));
       return kernel;
     }
@@ -153,39 +138,11 @@ class Kernel
     }
 
     /**
-     *
-     *
-     */
-    inline const std::string& logId() { return m_logId; }
-
-    /**
-     * @brief Set object id used for log messages
-     *
-     * @param[in] value The object id
-     */
-    inline void setLogId(std::string value)
-    {
-      m_logId = std::move(value);
-    }
-
-    /**
      * @brief Set DCC++ configuration
      *
      * @param[in] config The DCC++ configuration
      */
     void setConfig(const Config& config);
-
-    /**
-     * @brief ...
-     *
-     * @param[in] callback ...
-     * @note This function may not be called when the kernel is running.
-     */
-    inline void setOnStarted(std::function<void()> callback)
-    {
-      assert(!m_started);
-      m_onStarted = std::move(callback);
-    }
 
     /**
      * @brief ...

@@ -28,19 +28,17 @@
 #include "../../../utils/setthreadname.hpp"
 #include "../../../core/eventloop.hpp"
 #include "../../../log/log.hpp"
+#include "../../../log/logmessageexception.hpp"
 
 namespace XpressNet {
 
-Kernel::Kernel(const Config& config, bool simulation)
-  : m_ioContext{1}
+Kernel::Kernel(std::string logId_, const Config& config, bool simulation)
+  : KernelBase(std::move(logId_))
   , m_simulation{simulation}
   , m_decoderController{nullptr}
   , m_inputController{nullptr}
   , m_outputController{nullptr}
   , m_config{config}
-#ifndef NDEBUG
-  , m_started{false}
-#endif
 {
 }
 
@@ -51,13 +49,6 @@ void Kernel::setConfig(const Config& config)
     {
       m_config = newConfig;
     });
-}
-
-void Kernel::setOnError(std::function<void()> callback)
-{
-  assert(isEventLoopThread());
-  assert(!m_started);
-  m_onError = std::move(callback);
 }
 
 void Kernel::start()
@@ -81,14 +72,22 @@ void Kernel::start()
   m_ioContext.post(
     [this]()
     {
-      m_ioHandler->start();
-
-      if(m_onStarted)
+      try
+      {
+        m_ioHandler->start();
+      }
+      catch(const LogMessageException& e)
+      {
         EventLoop::call(
-          [this]()
+          [this, e]()
           {
-            m_onStarted();
+            Log::log(logId, e.message(), e.args());
+            error();
           });
+        return;
+      }
+
+      started();
     });
 
 #ifndef NDEBUG
@@ -119,7 +118,7 @@ void Kernel::receive(const Message& message)
     EventLoop::call(
       [this, msg=toString(message)]()
       {
-        Log::log(m_logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId, LogMessage::D2002_RX_X, msg);
       });
 
   switch(message.identification())
@@ -154,7 +153,7 @@ void Kernel::receive(const Message& message)
                     EventLoop::call(
                       [this, address=1 + fullAddress, value]()
                       {
-                        Log::log(m_logId, LogMessage::D2007_INPUT_X_IS_X, address, value == TriState::True ? std::string_view{"1"} : std::string_view{"0"});
+                        Log::log(logId, LogMessage::D2007_INPUT_X_IS_X, address, value == TriState::True ? std::string_view{"1"} : std::string_view{"0"});
                       });
 
                   m_inputValues[fullAddress] = value;
@@ -227,13 +226,6 @@ void Kernel::receive(const Message& message)
   }
 }
 
-void Kernel::error()
-{
-  assert(isEventLoopThread());
-  if(m_onError)
-    m_onError();
-}
-
 void Kernel::resumeOperations()
 {
   m_ioContext.post(
@@ -279,7 +271,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
           decoder.address,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 14),
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 14),
           decoder.getFunctionValue(0)));
         break;
 
@@ -288,7 +280,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
           decoder.address,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 27)));
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 27)));
         break;
 
       case 28:
@@ -296,7 +288,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
           decoder.address,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 28)));
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 28)));
         break;
 
       case 128:
@@ -304,7 +296,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
           decoder.address,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 126)));
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 126)));
         break;
 
       default:
@@ -457,7 +449,7 @@ void Kernel::send(const Message& message)
       EventLoop::call(
         [this, msg=toString(message)]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else
