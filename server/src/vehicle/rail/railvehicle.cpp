@@ -23,10 +23,12 @@
 #include "railvehicle.hpp"
 #include "railvehiclelist.hpp"
 #include "railvehiclelisttablemodel.hpp"
+#include "../../hardware/decoder/decoder.hpp"
 #include "../../world/world.hpp"
 #include "../../core/attributes.hpp"
 #include "../../core/objectproperty.tpp"
 #include "../../utils/displayname.hpp"
+#include "../../train/train.hpp"
 
 RailVehicle::RailVehicle(World& world, std::string_view _id) :
   Vehicle(world, _id),
@@ -34,7 +36,8 @@ RailVehicle::RailVehicle(World& world, std::string_view _id) :
   lob{*this, "lob", 0, LengthUnit::MilliMeter, PropertyFlags::ReadWrite | PropertyFlags::Store},
   speedMax{*this, "speed_max", 0, SpeedUnit::KiloMeterPerHour, PropertyFlags::ReadWrite | PropertyFlags::Store},
   weight{*this, "weight", 0, WeightUnit::Ton, PropertyFlags::ReadWrite | PropertyFlags::Store, [this](double /*value*/, WeightUnit /*unit*/){ updateTotalWeight(); }},
-  totalWeight{*this, "total_weight", 0, WeightUnit::Ton, PropertyFlags::ReadOnly | PropertyFlags::NoStore}
+  totalWeight{*this, "total_weight", 0, WeightUnit::Ton, PropertyFlags::ReadOnly | PropertyFlags::NoStore},
+  activeTrain{this, "active_train", nullptr, PropertyFlags::ReadOnly | PropertyFlags::ScriptReadOnly | PropertyFlags::StoreState}
 {
   const bool editable = contains(m_world.state.value(), WorldState::Edit);
 
@@ -58,6 +61,10 @@ RailVehicle::RailVehicle(World& world, std::string_view _id) :
   Attributes::addObjectEditor(totalWeight, false);
   Attributes::addDisplayName(totalWeight, DisplayName::Vehicle::Rail::totalWeight);
   m_interfaceItems.insertBefore(totalWeight, notes);
+
+  Attributes::addDisplayName(activeTrain, DisplayName::Vehicle::Rail::train); //TODO: "Active"
+  Attributes::addEnabled(activeTrain, true);
+  m_interfaceItems.insertBefore(activeTrain, notes);
 }
 
 void RailVehicle::addToWorld()

@@ -23,12 +23,13 @@
 #ifndef TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_LOCONET_KERNEL_HPP
 #define TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_LOCONET_KERNEL_HPP
 
+#include "../kernelbase.hpp"
 #include <array>
 #include <unordered_map>
-#include <thread>
-#include <boost/asio/io_context.hpp>
+#include <filesystem>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/signals2/connection.hpp>
+#include <tcb/span.hpp>
 #include <traintastic/enum/direction.hpp>
 #include <traintastic/enum/tristate.hpp>
 #include "config.hpp"
@@ -42,12 +43,13 @@ enum class SimulateInputAction;
 class InputController;
 class OutputController;
 class IdentificationController;
+class PCAP;
 
 namespace LocoNet {
 
 struct Message;
 
-class Kernel
+class Kernel : public ::KernelBase
 {
   public:
     using OnLNCVReadResponse = std::function<void(bool, uint16_t, uint16_t)>;
@@ -91,6 +93,8 @@ class Kernel
         bool append(const Message& message);
 
         void pop();
+
+        void clear();
     };
 
     struct LocoSlot
@@ -132,13 +136,8 @@ class Kernel
     };
     static_assert(sizeof(FastClock) == 4);
 
-    boost::asio::io_context m_ioContext;
     std::unique_ptr<IOHandler> m_ioHandler;
     const bool m_simulation;
-    std::thread m_thread;
-    std::string m_logId;
-    std::function<void()> m_onStarted;
-    std::function<void()> m_onError;
 
     std::array<SendQueue, 3> m_sendQueue;
     Priority m_sentMessagePriority;
@@ -178,12 +177,12 @@ class Kernel
 
     IdentificationController* m_identificationController;
 
-    Config m_config;
-#ifndef NDEBUG
-    bool m_started;
-#endif
+    const std::filesystem::path m_debugDir;
+    std::unique_ptr<PCAP> m_pcap;
 
-    Kernel(const Config& config, bool simulation);
+    Config m_config;
+
+    Kernel(std::string logId_, const Config& config, bool simulation);
 
     LocoSlot* getLocoSlot(uint8_t slot, bool sendSlotDataRequestIfNew = true);
     LocoSlot* getLocoSlotByAddress(uint16_t address);
@@ -202,6 +201,7 @@ class Kernel
     template<class T>
     void postSend(const T& message)
     {
+      assert(sizeof(message) == message.size());
       m_ioContext.post(
         [this, message]()
         {
@@ -211,6 +211,7 @@ class Kernel
     template<class T>
     void postSend(const T& message, Priority priority)
     {
+      assert(sizeof(message) == message.size());
       m_ioContext.post(
         [this, message, priority]()
         {
@@ -249,6 +250,8 @@ class Kernel
     template<uint8_t First, uint8_t Last, class T>
     bool updateFunctions(LocoSlot& slot, const T& message);
 
+    void startPCAP(PCAPOutput pcapOutput);
+
   public:
     static constexpr uint16_t inputAddressMin = 1;
     static constexpr uint16_t inputAddressMax = 4096;
@@ -259,6 +262,7 @@ class Kernel
 
     Kernel(const Kernel&) = delete;
     Kernel& operator =(const Kernel&) = delete;
+    ~Kernel();
 
 #ifndef NDEBUG
     bool isKernelThread() const
@@ -268,13 +272,6 @@ class Kernel
 #endif
 
     /**
-     * @brief IO context for LocoNet kernel and IO handler
-     *
-     * @return The IO context
-     */
-    boost::asio::io_context& ioContext() { return m_ioContext; }
-
-    /**
      * @brief Create kernel and IO handler
      *
      * @param[in] config LocoNet configuration
@@ -282,10 +279,10 @@ class Kernel
      * @return The kernel instance
      */
     template<class IOHandlerType, class... Args>
-    static std::unique_ptr<Kernel> create(const Config& config, Args... args)
+    static std::unique_ptr<Kernel> create(std::string logId_, const Config& config, Args... args)
     {
       static_assert(std::is_base_of_v<IOHandler, IOHandlerType>);
-      std::unique_ptr<Kernel> kernel{new Kernel(config, isSimulation<IOHandlerType>())};
+      std::unique_ptr<Kernel> kernel{new Kernel(std::move(logId_), config, isSimulation<IOHandlerType>())};
       kernel->setIOHandler(std::make_unique<IOHandlerType>(*kernel, std::forward<Args>(args)...));
       return kernel;
     }
@@ -303,44 +300,12 @@ class Kernel
       return static_cast<T&>(*m_ioHandler);
     }
 
-    /// @brief Get object id used for log messages
-    /// @return The object id
-    inline const std::string& logId()
-    {
-      return m_logId;
-    }
-
-    /**
-     * @brief Set object id used for log messages
-     *
-     * @param[in] value The object id
-     */
-    void setLogId(std::string value) { m_logId = std::move(value); }
-
     /**
      * @brief Set LocoNet configuration
      *
      * @param[in] config The LocoNet configuration
      */
     void setConfig(const Config& config);
-
-    /**
-     * @brief ...
-     *
-     * @param[in] callback ...
-     * @note This function may not be called when the kernel is running.
-     */
-    void setOnStarted(std::function<void()> callback);
-
-    /**
-     * \brief Register error handler
-     *
-     * Once this handler is called the LocoNet communication it stopped.
-     *
-     * \param[in] callback Handler to call in case of an error.
-     * \note This function may not be called when the kernel is running.
-     */
-    void setOnError(std::function<void()> callback);
 
     /**
      * @brief ...
@@ -436,9 +401,16 @@ class Kernel
      */
     void resume();
 
-    //TriState getInput(uint16_t address) const;
+    //! \brief Send LocoNet packet
+    //! \param[in] packet LocoNet packet bytes, exluding checksum.
+    //! \return \c true if send, \c false otherwise.
+    bool send(tcb::span<uint8_t> packet);
 
-    //TriState getOutput(uint16_t address) const;
+    //! \brief Send immediate DCC packet
+    //! \param[in] dccPacket DCC packet byte, exluding checksum. Length is limited to 5.
+    //! \param[in] repeat DCC packet repeat count 0..7
+    //! \return \c true if send to command station, \c false otherwise.
+    bool immPacket(tcb::span<uint8_t> dccPacket, uint8_t repeat);
 
     /**
      *

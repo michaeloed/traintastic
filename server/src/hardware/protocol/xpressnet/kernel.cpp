@@ -28,19 +28,17 @@
 #include "../../../utils/setthreadname.hpp"
 #include "../../../core/eventloop.hpp"
 #include "../../../log/log.hpp"
+#include "../../../log/logmessageexception.hpp"
 
 namespace XpressNet {
 
-Kernel::Kernel(const Config& config, bool simulation)
-  : m_ioContext{1}
+Kernel::Kernel(std::string logId_, const Config& config, bool simulation)
+  : KernelBase(std::move(logId_))
   , m_simulation{simulation}
   , m_decoderController{nullptr}
   , m_inputController{nullptr}
   , m_outputController{nullptr}
   , m_config{config}
-#ifndef NDEBUG
-  , m_started{false}
-#endif
 {
 }
 
@@ -74,14 +72,22 @@ void Kernel::start()
   m_ioContext.post(
     [this]()
     {
-      m_ioHandler->start();
-
-      if(m_onStarted)
+      try
+      {
+        m_ioHandler->start();
+      }
+      catch(const LogMessageException& e)
+      {
         EventLoop::call(
-          [this]()
+          [this, e]()
           {
-            m_onStarted();
+            Log::log(logId, e.message(), e.args());
+            error();
           });
+        return;
+      }
+
+      started();
     });
 
 #ifndef NDEBUG
@@ -112,7 +118,7 @@ void Kernel::receive(const Message& message)
     EventLoop::call(
       [this, msg=toString(message)]()
       {
-        Log::log(m_logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId, LogMessage::D2002_RX_X, msg);
       });
 
   switch(message.identification())
@@ -147,7 +153,7 @@ void Kernel::receive(const Message& message)
                     EventLoop::call(
                       [this, address=1 + fullAddress, value]()
                       {
-                        Log::log(m_logId, LogMessage::D2007_INPUT_X_IS_X, address, value == TriState::True ? std::string_view{"1"} : std::string_view{"0"});
+                        Log::log(logId, LogMessage::D2007_INPUT_X_IS_X, address, value == TriState::True ? std::string_view{"1"} : std::string_view{"0"});
                       });
 
                   m_inputValues[fullAddress] = value;
@@ -254,7 +260,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
 {
   if(m_config.useEmergencyStopLocomotiveCommand && changes == DecoderChangeFlags::EmergencyStop && decoder.emergencyStop)
   {
-    postSend(EmergencyStopLocomotive(decoder.address, decoder.longAddress));
+    postSend(EmergencyStopLocomotive(decoder.address));
   }
   else if(has(changes, DecoderChangeFlags::EmergencyStop | DecoderChangeFlags::Direction | DecoderChangeFlags::Throttle | DecoderChangeFlags::SpeedSteps))
   {
@@ -263,40 +269,38 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
       case 14:
         postSend(SpeedAndDirectionInstruction14(
           decoder.address,
-          decoder.longAddress,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 14),
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 14),
           decoder.getFunctionValue(0)));
         break;
 
       case 27:
         postSend(SpeedAndDirectionInstruction27(
           decoder.address,
-          decoder.longAddress,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 27)));
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 27)));
         break;
 
       case 28:
         postSend(SpeedAndDirectionInstruction28(
           decoder.address,
-          decoder.longAddress,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 28)));
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 28)));
         break;
 
-      case 126:
       case 128:
-      default:
         postSend(SpeedAndDirectionInstruction128(
           decoder.address,
-          decoder.longAddress,
           decoder.emergencyStop,
           decoder.direction,
-          Decoder::throttleToSpeedStep(decoder.throttle, 126)));
+          Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 126)));
+        break;
+
+      default:
+        assert(false);
         break;
     }
   }
@@ -306,7 +310,6 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
     {
       postSend(FunctionInstructionGroup1(
         decoder.address,
-        decoder.longAddress,
         decoder.getFunctionValue(0),
         decoder.getFunctionValue(1),
         decoder.getFunctionValue(2),
@@ -317,7 +320,6 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
     {
       postSend(FunctionInstructionGroup2(
         decoder.address,
-        decoder.longAddress,
         decoder.getFunctionValue(5),
         decoder.getFunctionValue(6),
         decoder.getFunctionValue(7),
@@ -327,7 +329,6 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
     {
       postSend(FunctionInstructionGroup3(
         decoder.address,
-        decoder.longAddress,
         decoder.getFunctionValue(9),
         decoder.getFunctionValue(10),
         decoder.getFunctionValue(11),
@@ -339,7 +340,6 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
       {
         postSend(RocoMultiMAUS::FunctionInstructionF13F20(
           decoder.address,
-          decoder.longAddress,
           decoder.getFunctionValue(13),
           decoder.getFunctionValue(14),
           decoder.getFunctionValue(15),
@@ -353,7 +353,6 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
       {
         postSend(FunctionInstructionGroup4(
           decoder.address,
-          decoder.longAddress,
           decoder.getFunctionValue(13),
           decoder.getFunctionValue(14),
           decoder.getFunctionValue(15),
@@ -368,7 +367,6 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
     {
       postSend(FunctionInstructionGroup5(
         decoder.address,
-        decoder.longAddress,
         decoder.getFunctionValue(21),
         decoder.getFunctionValue(22),
         decoder.getFunctionValue(23),
@@ -451,7 +449,7 @@ void Kernel::send(const Message& message)
       EventLoop::call(
         [this, msg=toString(message)]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else

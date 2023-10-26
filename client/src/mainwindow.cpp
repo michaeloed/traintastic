@@ -46,7 +46,9 @@
 #include "network/connection.hpp"
 #include "network/object.hpp"
 #include "network/property.hpp"
+#include "network/objectvectorproperty.hpp"
 #include "network/method.hpp"
+#include "network/error.hpp"
 #include "programming/lncv/lncvprogrammer.hpp"
 #include "subwindow/objectsubwindow.hpp"
 #include "subwindow/boardsubwindow.hpp"
@@ -111,6 +113,8 @@ MainWindow::MainWindow(QWidget* parent) :
   updateWindowTitle();
 
   QMenu* menu;
+  QAction* boardsAction;
+  QAction* trainsAction;
 
   m_mdiArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   m_mdiArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -181,7 +185,7 @@ MainWindow::MainWindow(QWidget* parent) :
                   QMessageBox::critical(
                     this,
                     Locale::tr("qtapp:import_world_failed"),
-                    Locale::tr("qtapp.error:server_error_x").arg(static_cast<std::underlying_type_t<Message::ErrorCode>>(response->errorCode())));
+                    Error(*response).toString());
                 }
               });
           }
@@ -264,7 +268,7 @@ MainWindow::MainWindow(QWidget* parent) :
                   QMessageBox::critical(
                     this,
                     Locale::tr("qtapp:export_world_failed"),
-                    Locale::tr("qtapp.error:server_error_x").arg(static_cast<std::underlying_type_t<Message::ErrorCode>>(response->errorCode())));
+                    Error(*response).toString());
                 }
               });
           }
@@ -383,9 +387,9 @@ MainWindow::MainWindow(QWidget* parent) :
     menu->addAction(Locale::tr("world:inputs") + "...", [this](){ showObject("world.inputs", Locale::tr("world:inputs")); });
     menu->addAction(Locale::tr("world:outputs") + "...", [this](){ showObject("world.outputs", Locale::tr("world:outputs")); });
     menu->addAction(Locale::tr("hardware:identifications") + "...", [this](){ showObject("world.identifications", Locale::tr("hardware:identifications")); });
-    m_menuObjects->addAction(Locale::tr("world:boards") + "...", [this](){ showObject("world.boards", Locale::tr("world:boards")); });
+    boardsAction = m_menuObjects->addAction(Theme::getIcon("board"), Locale::tr("world:boards") + "...", [this](){ showObject("world.boards", Locale::tr("world:boards")); });
     m_menuObjects->addAction(Theme::getIcon("clock"), Locale::tr("world:clock") + "...", [this](){ showObject("world.clock", Locale::tr("world:clock")); });
-    m_menuObjects->addAction(Locale::tr("world:trains") + "...", [this](){ showObject("world.trains", Locale::tr("world:trains")); });
+    trainsAction = m_menuObjects->addAction(Theme::getIcon("train"), Locale::tr("world:trains") + "...", [this](){ showObject("world.trains", Locale::tr("world:trains")); });
     m_menuObjects->addAction(Locale::tr("world:rail_vehicles") + "...", [this](){ showObject("world.rail_vehicles", Locale::tr("world:rail_vehicles")); });
     m_actionLuaScript = m_menuObjects->addAction(Theme::getIcon("lua"), Locale::tr("world:lua_scripts") + "...", [this](){ showObject("world.lua_scripts", Locale::tr("world:lua_scripts")); });
 
@@ -506,6 +510,14 @@ MainWindow::MainWindow(QWidget* parent) :
   spacer->show();
   m_toolbar->addWidget(spacer);
 
+  m_toolbar->addAction(boardsAction);
+  m_toolbar->addAction(trainsAction);
+
+  spacer = new QWidget(this);
+  spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  spacer->show();
+  m_toolbar->addWidget(spacer);
+
   m_toolbar->addAction(m_worldEditAction);
 
   QVBoxLayout* l = new QVBoxLayout();
@@ -538,6 +550,12 @@ MainWindow::~MainWindow()
 {
   for(SubWindow* window : m_subWindows)
     disconnect(window, &QMdiSubWindow::destroyed, nullptr, nullptr);
+}
+
+const ObjectPtr& MainWindow::world() const
+{
+  static const ObjectPtr null;
+  return m_connection ? m_connection->world() : null;
 }
 
 void MainWindow::connectToServer(const QString& url)
@@ -600,10 +618,10 @@ void MainWindow::worldChanged()
     m_world = m_connection->world();
 
     m_clockRequest = m_connection->getObject("world.clock",
-      [this](const ObjectPtr& object, Message::ErrorCode ec)
+      [this](const ObjectPtr& object, std::optional<const Error> error)
       {
         m_clockRequest = Connection::invalidRequestId;
-        if(object && !ec)
+        if(object && !error)
         {
           if(auto* freeze = object->getProperty("freeze"))
           {
@@ -642,6 +660,7 @@ void MainWindow::worldChanged()
     }
   }
 
+  static_cast<MainWindowStatusBar*>(statusBar())->worldChanged();
   updateWindowTitle();
 }
 

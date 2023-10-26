@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,9 +24,12 @@
 #define TRAINTASTIC_SERVER_HARDWARE_INTERFACE_WLANMAUSINTERFACE_HPP
 
 #include "interface.hpp"
-#include "../protocol/z21/serverkernel.hpp"
-#include "../protocol/z21/serversettings.hpp"
 #include "../../core/objectproperty.hpp"
+
+namespace Z21 {
+class ServerKernel;
+class ServerSettings;
+}
 
 /**
  * @brief WLANmaus/Z21 app hardware interface
@@ -35,7 +38,7 @@ class WlanMausInterface : public Interface
 {
   CLASS_ID("interface.wlanmaus")
   DEFAULT_ID("wlanmaus")
-  CREATE(WlanMausInterface)
+  CREATE_DEF(WlanMausInterface)
 
   private:
     std::unique_ptr<Z21::ServerKernel> m_kernel;
@@ -43,7 +46,6 @@ class WlanMausInterface : public Interface
 
   protected:
     void worldEvent(WorldState state, WorldEvent event) final;
-    void idChanged(const std::string& newId) final;
     bool setOnline(bool& value, bool simulation) final;
 
   public:

@@ -36,17 +36,14 @@
 
 namespace DCCPlusPlus {
 
-Kernel::Kernel(const Config& config, bool simulation)
-  : m_ioContext{1}
+Kernel::Kernel(std::string logId_, const Config& config, bool simulation)
+  : KernelBase(std::move(logId_))
   , m_simulation{simulation}
   , m_startupDelayTimer{m_ioContext}
   , m_decoderController{nullptr}
   , m_inputController{nullptr}
   , m_outputController{nullptr}
   , m_config{config}
-#ifndef NDEBUG
-  , m_started{false}
-#endif
 {
 }
 
@@ -119,7 +116,7 @@ void Kernel::receive(std::string_view message)
     EventLoop::call(
       [this, msg=std::string(rtrim(message, '\n'))]()
       {
-        Log::log(m_logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId, LogMessage::D2002_RX_X, msg);
       });
 
   if(message.size() > 1 && message[0] == '<')
@@ -282,7 +279,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
 {
   if(has(changes, DecoderChangeFlags::EmergencyStop | DecoderChangeFlags::Throttle | DecoderChangeFlags::Direction))
   {
-    const uint8_t speed = Decoder::throttleToSpeedStep(decoder.throttle, 126);
+    const uint8_t speed = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 126);
     m_ioContext.post(
       [this, address=decoder.address.value(), emergencyStop=decoder.emergencyStop.value(), speed, direction=decoder.direction.value()]()
       {
@@ -387,7 +384,7 @@ void Kernel::send(std::string_view message)
       EventLoop::call(
         [this, msg=std::string(rtrim(message, '\n'))]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else
@@ -399,7 +396,7 @@ void Kernel::startupDelayExpired(const boost::system::error_code& ec)
   if(ec)
     return;
 
-  m_onStarted();
+  started();
 }
 
 }

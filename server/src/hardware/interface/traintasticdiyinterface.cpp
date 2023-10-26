@@ -23,6 +23,8 @@
 #include "traintasticdiyinterface.hpp"
 #include "../input/list/inputlist.hpp"
 #include "../output/list/outputlist.hpp"
+#include "../protocol/traintasticdiy/kernel.hpp"
+#include "../protocol/traintasticdiy/settings.hpp"
 #include "../protocol/traintasticdiy/messages.hpp"
 #include "../protocol/traintasticdiy/iohandler/serialiohandler.hpp"
 #include "../protocol/traintasticdiy/iohandler/simulationiohandler.hpp"
@@ -37,6 +39,8 @@
 
 constexpr auto inputListColumns = InputListColumn::Id | InputListColumn::Name | InputListColumn::Address;
 constexpr auto outputListColumns = OutputListColumn::Id | OutputListColumn::Name | OutputListColumn::Address;
+
+CREATE_IMPL(TraintasticDIYInterface)
 
 TraintasticDIYInterface::TraintasticDIYInterface(World& world, std::string_view _id)
   : Interface(world, _id)
@@ -96,18 +100,28 @@ TraintasticDIYInterface::TraintasticDIYInterface(World& world, std::string_view 
   updateVisible();
 }
 
+std::pair<uint32_t, uint32_t> TraintasticDIYInterface::inputAddressMinMax(uint32_t) const
+{
+  return {TraintasticDIY::Kernel::ioAddressMin, TraintasticDIY::Kernel::ioAddressMax};
+}
+
 void TraintasticDIYInterface::inputSimulateChange(uint32_t channel, uint32_t address, SimulateInputAction action)
 {
   if(m_kernel && inRange(address, outputAddressMinMax(channel)))
     m_kernel->simulateInputChange(address, action);
 }
 
+std::pair<uint32_t, uint32_t> TraintasticDIYInterface::outputAddressMinMax(uint32_t) const
+{
+  return {TraintasticDIY::Kernel::ioAddressMin, TraintasticDIY::Kernel::ioAddressMax};
+}
+
 bool TraintasticDIYInterface::setOutputValue(uint32_t channel, uint32_t address, bool value)
 {
   assert(isOutputChannel(channel));
   return
-    m_kernel &&
-    inRange(address, outputAddressMinMax(channel)) &&
+      m_kernel &&
+      inRange(address, outputAddressMinMax(channel)) &&
     m_kernel->setOutput(static_cast<uint16_t>(address), value);
 }
 
@@ -119,18 +133,18 @@ bool TraintasticDIYInterface::setOnline(bool& value, bool simulation)
     {
       if(simulation)
       {
-        m_kernel = TraintasticDIY::Kernel::create<TraintasticDIY::SimulationIOHandler>(m_world, traintasticDIY->config());
+        m_kernel = TraintasticDIY::Kernel::create<TraintasticDIY::SimulationIOHandler>(id.value(), m_world, traintasticDIY->config());
       }
       else
       {
         switch(type)
         {
           case TraintasticDIYInterfaceType::Serial:
-            m_kernel = TraintasticDIY::Kernel::create<TraintasticDIY::SerialIOHandler>(m_world, traintasticDIY->config(), device.value(), baudrate.value(), flowControl.value());
+            m_kernel = TraintasticDIY::Kernel::create<TraintasticDIY::SerialIOHandler>(id.value(), m_world, traintasticDIY->config(), device.value(), baudrate.value(), flowControl.value());
             break;
 
           case TraintasticDIYInterfaceType::NetworkTCP:
-            m_kernel = TraintasticDIY::Kernel::create<TraintasticDIY::TCPIOHandler>(m_world, traintasticDIY->config(), hostname.value(), port.value());
+            m_kernel = TraintasticDIY::Kernel::create<TraintasticDIY::TCPIOHandler>(id.value(), m_world, traintasticDIY->config(), hostname.value(), port.value());
             break;
         }
       }
@@ -141,15 +155,19 @@ bool TraintasticDIYInterface::setOnline(bool& value, bool simulation)
         return false;
       }
 
-      status.setValueInternal(InterfaceStatus::Initializing);
+      setState(InterfaceState::Initializing);
 
-      m_kernel->setLogId(id.value());
       m_kernel->setOnStarted(
         [this]()
         {
-          status.setValueInternal(InterfaceStatus::Online);
+          setState(InterfaceState::Online);
         });
-
+      m_kernel->setOnError(
+        [this]()
+        {
+          setState(InterfaceState::Error);
+          online = false; // communication no longer possible
+        });
       m_kernel->setInputController(this);
       m_kernel->setOutputController(this);
       m_kernel->start();
@@ -164,7 +182,7 @@ bool TraintasticDIYInterface::setOnline(bool& value, bool simulation)
     }
     catch(const LogMessageException& e)
     {
-      status.setValueInternal(InterfaceStatus::Offline);
+      setState(InterfaceState::Offline);
       Log::log(*this, e.message(), e.args());
       return false;
     }
@@ -178,7 +196,7 @@ bool TraintasticDIYInterface::setOnline(bool& value, bool simulation)
     m_kernel->stop();
     m_kernel.reset();
 
-    status.setValueInternal(InterfaceStatus::Offline);
+    setState(InterfaceState::Offline);
   }
   return true;
 }
@@ -202,12 +220,6 @@ void TraintasticDIYInterface::destroying()
   OutputController::destroying();
   InputController::destroying();
   Interface::destroying();
-}
-
-void TraintasticDIYInterface::idChanged(const std::string& newId)
-{
-  if(m_kernel)
-    m_kernel->setLogId(newId);
 }
 
 void TraintasticDIYInterface::updateVisible()

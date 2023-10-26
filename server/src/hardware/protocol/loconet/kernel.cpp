@@ -29,11 +29,16 @@
 #include "../../input/inputcontroller.hpp"
 #include "../../output/outputcontroller.hpp"
 #include "../../identification/identificationcontroller.hpp"
+#include "../../../utils/datetimestr.hpp"
 #include "../../../utils/setthreadname.hpp"
 #include "../../../utils/inrange.hpp"
+#include "../../../pcap/pcapfile.hpp"
+#include "../../../pcap/pcappipe.hpp"
 #include "../../../core/eventloop.hpp"
 #include "../../../log/log.hpp"
+#include "../../../log/logmessageexception.hpp"
 #include "../../../clock/clock.hpp"
+#include "../../../traintastic/traintastic.hpp"
 #include "../dcc/dcc.hpp"
 
 namespace LocoNet {
@@ -47,7 +52,12 @@ static void updateDecoderSpeed(const std::shared_ptr<Decoder>& decoder, uint8_t 
   if(speed == SPEED_STOP || speed == SPEED_ESTOP)
     decoder->throttle.setValueInternal(Decoder::throttleStop);
   else
-    decoder->throttle.setValueInternal(Decoder::speedStepToThrottle(speed - 1, SPEED_MAX - 1));
+  {
+    speed--; // decrement one for ESTOP: 2..127 -> 1..126
+    const uint8_t currentStep = Decoder::throttleToSpeedStep<uint8_t>(decoder->throttle.value(), SPEED_MAX - 1);
+    if(currentStep != speed) // only update trottle if it is a different step
+      decoder->throttle.setValueInternal(Decoder::speedStepToThrottle<uint8_t>(speed, SPEED_MAX - 1));
+  }
 }
 
 constexpr Kernel::Priority& operator ++(Kernel::Priority& value)
@@ -55,8 +65,8 @@ constexpr Kernel::Priority& operator ++(Kernel::Priority& value)
   return (value = static_cast<Kernel::Priority>(static_cast<std::underlying_type_t<Kernel::Priority>>(value) + 1));
 }
 
-Kernel::Kernel(const Config& config, bool simulation)
-  : m_ioContext{1}
+Kernel::Kernel(std::string logId_, const Config& config, bool simulation)
+  : KernelBase(std::move(logId_))
   , m_simulation{simulation}
   , m_waitingForEcho{false}
   , m_waitingForEchoTimer{m_ioContext}
@@ -67,13 +77,13 @@ Kernel::Kernel(const Config& config, bool simulation)
   , m_inputController{nullptr}
   , m_outputController{nullptr}
   , m_identificationController{nullptr}
+  , m_debugDir{Traintastic::instance->debugDir()}
   , m_config{config}
-#ifndef NDEBUG
-  , m_started{false}
-#endif
 {
   assert(isEventLoopThread());
 }
+
+Kernel::~Kernel() = default;
 
 void Kernel::setConfig(const Config& config)
 {
@@ -93,6 +103,39 @@ void Kernel::setConfig(const Config& config)
   m_ioContext.post(
     [this, newConfig=config]()
     {
+      if(newConfig.pcap != m_config.pcap)
+      {
+        if(newConfig.pcap)
+          startPCAP(newConfig.pcapOutput);
+        else
+          m_pcap.reset();
+      }
+      else if(newConfig.pcap && newConfig.pcapOutput != m_config.pcapOutput)
+      {
+        m_pcap.reset();
+        startPCAP(newConfig.pcapOutput);
+      }
+
+      if(newConfig.listenOnly && !m_config.listenOnly)
+      {
+        for(auto& queue : m_sendQueue)
+          queue.clear();
+
+        EventLoop::call(
+          [this]()
+          {
+            Log::log(logId, LogMessage::N2006_LISTEN_ONLY_MODE_ACTIVATED);
+          });
+      }
+      else if(!newConfig.listenOnly && m_config.listenOnly)
+      {
+        EventLoop::call(
+          [this]()
+          {
+            Log::log(logId, LogMessage::N2007_LISTEN_ONLY_MODE_DEACTIVATED);
+          });
+      }
+
       if(m_config.fastClock == LocoNetFastClock::Master && newConfig.fastClock == LocoNetFastClock::Off)
       {
         setFastClockMaster(false);
@@ -113,20 +156,6 @@ void Kernel::setConfig(const Config& config)
       }
       m_config = newConfig;
     });
-}
-
-void Kernel::setOnStarted(std::function<void()> callback)
-{
-  assert(isEventLoopThread());
-  assert(!m_started);
-  m_onStarted = std::move(callback);
-}
-
-void Kernel::setOnError(std::function<void()> callback)
-{
-  assert(isEventLoopThread());
-  assert(!m_started);
-  m_onError = std::move(callback);
 }
 
 void Kernel::setOnGlobalPowerChanged(std::function<void(bool)> callback)
@@ -195,6 +224,9 @@ void Kernel::start()
   m_inputValues.fill(TriState::Undefined);
   m_outputValues.fill(TriState::Undefined);
 
+  if(m_config.listenOnly)
+    Log::log(logId, LogMessage::N2006_LISTEN_ONLY_MODE_ACTIVATED);
+
   m_thread = std::thread(
     [this]()
     {
@@ -209,7 +241,23 @@ void Kernel::start()
   m_ioContext.post(
     [this]()
     {
-      m_ioHandler->start();
+      if(m_config.pcap)
+        startPCAP(m_config.pcapOutput);
+
+      try
+      {
+        m_ioHandler->start();
+      }
+      catch(const LogMessageException& e)
+      {
+        EventLoop::call(
+          [this, e]()
+          {
+            Log::log(logId, e.message(), e.args());
+            error();
+          });
+        return;
+      }
 
       if(m_config.fastClock == LocoNetFastClock::Master)
         setFastClockMaster(true);
@@ -220,12 +268,7 @@ void Kernel::start()
       for(uint8_t slot = SLOT_LOCO_MIN; slot <= m_config.locomotiveSlots; slot++)
         send(RequestSlotData(slot), LowPriority);
 
-      if(m_onStarted)
-        EventLoop::call(
-          [this]()
-          {
-            m_onStarted();
-          });
+      started();
     });
 
 #ifndef NDEBUG
@@ -246,6 +289,7 @@ void Kernel::stop()
       m_waitingForResponseTimer.cancel();
       m_fastClockSyncTimer.cancel();
       m_ioHandler->stop();
+      m_pcap.reset();
     });
 
   m_ioContext.stop();
@@ -260,9 +304,13 @@ void Kernel::stop()
 void Kernel::receive(const Message& message)
 {
   assert(isKernelThread());
+  assert(isValid(message)); // only valid messages should be received
+
+  if(m_pcap)
+    m_pcap->writeRecord(&message, message.size());
 
   if(m_config.debugLogRXTX)
-    EventLoop::call([this, msg=toString(message)](){ Log::log(m_logId, LogMessage::D2002_RX_X, msg); });
+    EventLoop::call([this, msg=toString(message)](){ Log::log(logId, LogMessage::D2002_RX_X, msg); });
 
   bool isResponse = false;
   if(m_waitingForEcho && message == lastSentMessage())
@@ -413,23 +461,26 @@ void Kernel::receive(const Message& message)
       if(m_inputController)
       {
         const auto& inputRep = static_cast<const InputRep&>(message);
-        const auto value = toTriState(inputRep.value());
-        if(m_inputValues[inputRep.fullAddress()] != value)
+        if(inputRep.isControlSet())
         {
-          if(m_config.debugLogInput)
+          const auto value = toTriState(inputRep.value());
+          if(m_inputValues[inputRep.fullAddress()] != value)
+          {
+            if(m_config.debugLogInput)
+              EventLoop::call(
+                [this, address=1 + inputRep.fullAddress(), value=inputRep.value()]()
+                {
+                  Log::log(logId, LogMessage::D2007_INPUT_X_IS_X, address, value ? std::string_view{"1"} : std::string_view{"0"});
+                });
+
+            m_inputValues[inputRep.fullAddress()] = value;
+
             EventLoop::call(
-              [this, address=1 + inputRep.fullAddress(), value=inputRep.value()]()
+              [this, address=1 + inputRep.fullAddress(), value]()
               {
-                Log::log(m_logId, LogMessage::D2007_INPUT_X_IS_X, address, value ? std::string_view{"1"} : std::string_view{"0"});
+                m_inputController->updateInputValue(InputController::defaultInputChannel, address, value);
               });
-
-          m_inputValues[inputRep.fullAddress()] = value;
-
-          EventLoop::call(
-            [this, address=1 + inputRep.fullAddress(), value]()
-            {
-              m_inputController->updateInputValue(InputController::defaultInputChannel, address, value);
-            });
+          }
         }
       }
       break;
@@ -445,7 +496,7 @@ void Kernel::receive(const Message& message)
             EventLoop::call(
               [this, address=1 + switchRequest.fullAddress(), on=switchRequest.on()]()
               {
-                Log::log(m_logId, LogMessage::D2008_OUTPUT_X_IS_X, address, on ? std::string_view{"1"} : std::string_view{"0"});
+                Log::log(logId, LogMessage::D2008_OUTPUT_X_IS_X, address, on ? std::string_view{"1"} : std::string_view{"0"});
               });
 
           m_outputValues[switchRequest.fullAddress()] = on;
@@ -542,7 +593,7 @@ void Kernel::receive(const Message& message)
         EventLoop::call(
           [this]()
           {
-            Log::log(m_logId, LogMessage::C2004_CANT_GET_FREE_SLOT);
+            Log::log(logId, LogMessage::C2004_CANT_GET_FREE_SLOT);
           });
       }
       else if(longAck.respondingOpCode() == OPC_RQ_SL_DATA && longAck.ack1 == 0 && lastSentMessage().opCode == OPC_RQ_SL_DATA)
@@ -554,7 +605,7 @@ void Kernel::receive(const Message& message)
           EventLoop::call(
             [this, slot]()
             {
-              Log::log(m_logId, LogMessage::W2006_COMMAND_STATION_DOES_NOT_SUPPORT_LOCO_SLOT_X, slot);
+              Log::log(logId, LogMessage::W2006_COMMAND_STATION_DOES_NOT_SUPPORT_LOCO_SLOT_X, slot);
             });
         }
         else if(slot == SLOT_FAST_CLOCK)
@@ -566,9 +617,9 @@ void Kernel::receive(const Message& message)
           EventLoop::call(
             [this, stoppedFastClockSyncTimer=m_config.fastClockSyncEnabled]()
             {
-              Log::log(m_logId, LogMessage::W2007_COMMAND_STATION_DOES_NOT_SUPPORT_THE_FAST_CLOCK_SLOT);
+              Log::log(logId, LogMessage::W2007_COMMAND_STATION_DOES_NOT_SUPPORT_THE_FAST_CLOCK_SLOT);
               if(stoppedFastClockSyncTimer)
-                Log::log(m_logId, LogMessage::N2003_STOPPED_SENDING_FAST_CLOCK_SYNC);
+                Log::log(logId, LogMessage::N2003_STOPPED_SENDING_FAST_CLOCK_SYNC);
             });
         }
       }
@@ -627,7 +678,7 @@ void Kernel::receive(const Message& message)
           {
             m_identificationController->identificationEvent(
               IdentificationController::defaultIdentificationChannel,
-              multiSenseTransponder.sensorAddress(),
+              1 + multiSenseTransponder.sensorAddress(),
               multiSenseTransponder.isPresent() ? IdentificationEventType::Present : IdentificationEventType::Absent,
               multiSenseTransponder.transponderAddress(),
               Direction::Unknown,
@@ -713,17 +764,17 @@ void Kernel::receive(const Message& message)
     case OPC_MULTI_SENSE_LONG:
     {
       const MultiSenseLong& multiSense = static_cast<const MultiSenseLong&>(message);
-      if(multiSense.isTransponder())
+      if(multiSense.code() == MultiSenseLong::Code::ReleaseTransponder || multiSense.code() == MultiSenseLong::Code::DetectTransponder)
       {
         EventLoop::call(
-          [this, multiSenseTransponder=static_cast<const MultiSenseLongTransponder&>(multiSense)]()
+          [this, multiSense]()
           {
             m_identificationController->identificationEvent(
               IdentificationController::defaultIdentificationChannel,
-              multiSenseTransponder.sensorAddress(),
-              multiSenseTransponder.isPresent() ? IdentificationEventType::Present : IdentificationEventType::Absent,
-              multiSenseTransponder.transponderAddress(),
-              multiSenseTransponder.transponderDirection(),
+              1 + multiSense.sensorAddress(),
+              multiSense.code()  == MultiSenseLong::Code::DetectTransponder ? IdentificationEventType::Present : IdentificationEventType::Absent,
+              multiSense.transponderAddress(),
+              multiSense.transponderDirection(),
               0);
           });
       }
@@ -887,13 +938,46 @@ void Kernel::resume()
     });
 }
 
+bool Kernel::send(tcb::span<uint8_t> packet)
+{
+  assert(isEventLoopThread());
+
+  if(reinterpret_cast<Message*>(packet.data())->size() != packet.size() + 1) // verify packet length, must be all bytes excluding checksum
+    return false;
+
+  std::vector<uint8_t> data(packet.data(), packet.data() + packet.size());
+  data.push_back(calcChecksum(*reinterpret_cast<Message*>(data.data())));
+
+  if(!isValid(*reinterpret_cast<Message*>(data.data())))
+    return false;
+
+  m_ioContext.post(
+    [this, message=std::move(data)]()
+    {
+      send(*reinterpret_cast<const Message*>(message.data()));
+    });
+
+  return true;
+}
+
+bool Kernel::immPacket(tcb::span<uint8_t> dccPacket, uint8_t repeat)
+{
+  assert(isEventLoopThread());
+
+  if(dccPacket.size() > ImmPacket::dccPacketSizeMax || repeat > ImmPacket::repeatMax)
+    return false;
+
+  postSend(ImmPacket(dccPacket, repeat));
+  return true;
+}
+
 void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, uint32_t functionNumber)
 {
   assert(isEventLoopThread());
 
   if(has(changes, DecoderChangeFlags::EmergencyStop | DecoderChangeFlags::Throttle))
   {
-    const uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, SPEED_MAX - 1);
+    const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, SPEED_MAX - 1);
     if(m_emergencyStop == TriState::False || decoder.emergencyStop || speedStep == SPEED_STOP)
     {
       // only send speed updates if bus estop isn't active, except for speed STOP and ESTOP
@@ -930,7 +1014,7 @@ void Kernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, 
       {
         case LocoNetF9F28::IMMPacket:
         {
-          const bool longAddress = (decoder.address > DCC::addressShortMax) || decoder.longAddress;
+          const bool longAddress = decoder.protocol == DecoderProtocol::DCCLong;
 
           if(functionNumber <= 12)
           {
@@ -1218,7 +1302,7 @@ void Kernel::clearLocoSlot(uint8_t slot)
 std::shared_ptr<Decoder> Kernel::getDecoder(uint16_t address)
 {
   assert(isEventLoopThread());
-  return m_decoderController->getDecoder(DecoderProtocol::DCC, address, DCC::isLongAddress(address), true);
+  return m_decoderController->getDecoder(DCC::getProtocol(address), address);
 }
 
 void Kernel::setIOHandler(std::unique_ptr<IOHandler> handler)
@@ -1232,6 +1316,9 @@ void Kernel::setIOHandler(std::unique_ptr<IOHandler> handler)
 void Kernel::send(const Message& message, Priority priority)
 {
   assert(isKernelThread());
+
+  if(m_config.listenOnly)
+    return; // drop it
 
   if(!m_sendQueue[priority].append(message))
   {
@@ -1285,7 +1372,7 @@ void Kernel::sendNextMessage()
       const Message& message = m_sendQueue[priority].front();
 
       if(m_config.debugLogRXTX)
-        EventLoop::call([this, msg=toString(message)](){ Log::log(m_logId, LogMessage::D2001_TX_X, msg); });
+        EventLoop::call([this, msg=toString(message)](){ Log::log(logId, LogMessage::D2001_TX_X, msg); });
 
       if(m_ioHandler->send(message))
       {
@@ -1319,7 +1406,7 @@ void Kernel::waitingForEchoTimerExpired(const boost::system::error_code& ec)
   EventLoop::call(
     [this]()
     {
-      Log::log(m_logId, LogMessage::W2018_TIMEOUT_NO_ECHO_WITHIN_X_MS, m_config.echoTimeout);
+      Log::log(logId, LogMessage::W2018_TIMEOUT_NO_ECHO_WITHIN_X_MS, m_config.echoTimeout);
     });
 }
 
@@ -1335,7 +1422,7 @@ void Kernel::waitingForResponseTimerExpired(const boost::system::error_code& ec)
     EventLoop::call(
       [this, lncvStart=static_cast<const Uhlenbrock::LNCVStart&>(lastSentMessage())]()
       {
-        Log::log(m_logId, LogMessage::N2002_NO_RESPONSE_FROM_LNCV_MODULE_X_WITH_ADDRESS_X, lncvStart.moduleId(), lncvStart.address());
+        Log::log(logId, LogMessage::N2002_NO_RESPONSE_FROM_LNCV_MODULE_X_WITH_ADDRESS_X, lncvStart.moduleId(), lncvStart.address());
 
         if(m_onLNCVReadResponse && m_lncvModuleId == lncvStart.moduleId())
           m_onLNCVReadResponse(false, lncvStart.address(), 0);
@@ -1348,9 +1435,8 @@ void Kernel::waitingForResponseTimerExpired(const boost::system::error_code& ec)
     EventLoop::call(
       [this]()
       {
-        Log::log(m_logId, LogMessage::E2019_TIMEOUT_NO_RESPONSE_WITHIN_X_MS, m_config.responseTimeout);
-        if(m_onError)
-          m_onError();
+        Log::log(logId, LogMessage::E2019_TIMEOUT_NO_RESPONSE_WITHIN_X_MS, m_config.responseTimeout);
+        error();
       });
   }
 }
@@ -1451,6 +1537,56 @@ bool Kernel::updateFunctions(LocoSlot& slot, const T& message)
   return changed;
 }
 
+void Kernel::startPCAP(PCAPOutput pcapOutput)
+{
+  assert(isKernelThread());
+  assert(!m_pcap);
+
+  const uint32_t DLT_USER0 = 147; //! \todo change to LocoNet DLT once it is registered
+
+  try
+  {
+    switch(pcapOutput)
+    {
+      case PCAPOutput::File:
+      {
+        const auto filename = m_debugDir / logId += dateTimeStr() += ".pcap";
+        EventLoop::call(
+          [this, filename]()
+          {
+            Log::log(logId, LogMessage::N2004_STARTING_PCAP_FILE_LOG_X, filename);
+          });
+        m_pcap = std::make_unique<PCAPFile>(filename, DLT_USER0);
+        break;
+      }
+      case PCAPOutput::Pipe:
+      {
+        std::filesystem::path pipe;
+#ifdef WIN32
+        return; //! \todo Implement
+#else // unix
+        pipe = std::filesystem::temp_directory_path() / "traintastic-server" / logId;
+#endif
+        EventLoop::call(
+          [this, pipe]()
+          {
+            Log::log(logId, LogMessage::N2005_STARTING_PCAP_LOG_PIPE_X, pipe);
+          });
+        m_pcap = std::make_unique<PCAPPipe>(std::move(pipe), DLT_USER0);
+        break;
+      }
+    }
+  }
+  catch(const std::exception& e)
+  {
+    EventLoop::call(
+      [this, what=std::string(e.what())]()
+      {
+        Log::log(logId, LogMessage::E2021_STARTING_PCAP_LOG_FAILED_X, what);
+      });
+  }
+}
+
 
 bool Kernel::SendQueue::append(const Message& message)
 {
@@ -1475,6 +1611,11 @@ void Kernel::SendQueue::pop()
     memmove(m_buffer.data(), m_front, m_bytes);
     m_front = m_buffer.data();
   }
+}
+
+void Kernel::SendQueue::clear()
+{
+  m_bytes = 0;
 }
 
 }

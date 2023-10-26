@@ -20,11 +20,14 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#include "train.hpp"
 #include "trainlist.hpp"
 #include "trainlisttablemodel.hpp"
 #include "../world/world.hpp"
 #include "../world/getworld.hpp"
 #include "../core/attributes.hpp"
+#include "../core/method.tpp"
+#include "../log/logmessageexception.hpp"
 #include "../utils/displayname.hpp"
 
 TrainList::TrainList(Object& _parent, std::string_view parentPropertyName) :
@@ -35,7 +38,15 @@ TrainList::TrainList(Object& _parent, std::string_view parentPropertyName) :
       auto& world = getWorld(parent());
       return Train::create(world, world.getUniqueId("train"));
     }}
-  , delete_{*this, "delete", std::bind(&TrainList::deleteMethodHandler, this, std::placeholders::_1)}
+  , delete_{*this, "delete",
+      [this](const std::shared_ptr<Train>& train)
+      {
+        if(train->active)
+        {
+          throw LogMessageException(LogMessage::E3002_CANT_DELETE_ACTIVE_TRAIN);
+        }
+        deleteMethodHandler(train);
+      }}
 {
   Attributes::addDisplayName(create, DisplayName::List::create);
   m_interfaceItems.add(create);

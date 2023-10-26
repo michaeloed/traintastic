@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022 Reinder Feenstra
+ * Copyright (C) 2022-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -23,8 +23,10 @@
 #include "withrottleinterface.hpp"
 #include "../throttle/list/throttlelistcolumn.hpp"
 #include "../protocol/withrottle/kernel.hpp"
+#include "../protocol/withrottle/settings.hpp"
 #include "../protocol/withrottle/iohandler/tcpiohandler.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/method.tpp"
 #include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../log/logmessageexception.hpp"
@@ -32,6 +34,8 @@
 #include "../../world/world.hpp"
 
 static constexpr auto throttleListColumns = ThrottleListColumn::Id | ThrottleListColumn::Name;
+
+CREATE_IMPL(WiThrottleInterface)
 
 WiThrottleInterface::WiThrottleInterface(World& world, std::string_view _id)
   : Interface(world, _id)
@@ -82,16 +86,20 @@ bool WiThrottleInterface::setOnline(bool& value, bool simulation)
 
     try
     {
-      m_kernel = WiThrottle::Kernel::create<WiThrottle::TCPIOHandler>(wiThrottle->config(), port.value());
+      m_kernel = WiThrottle::Kernel::create<WiThrottle::TCPIOHandler>(id.value(), wiThrottle->config(), port.value());
 
-      status.setValueInternal(InterfaceStatus::Initializing);
-
-      m_kernel->setLogId(id.value());
+      setState(InterfaceState::Initializing);
 
       m_kernel->setOnStarted(
         [this]()
         {
-          status.setValueInternal(InterfaceStatus::Online);
+          setState(InterfaceState::Online);
+        });
+      m_kernel->setOnError(
+        [this]()
+        {
+          setState(InterfaceState::Error);
+          online = false; // communication no longer possible
         });
 
       m_kernel->setClock(world().clock.value());
@@ -105,7 +113,7 @@ bool WiThrottleInterface::setOnline(bool& value, bool simulation)
     }
     catch(const LogMessageException& e)
     {
-      status.setValueInternal(InterfaceStatus::Offline);
+      setState(InterfaceState::Offline);
       Log::log(*this, e.message(), e.args());
       return false;
     }
@@ -117,7 +125,7 @@ bool WiThrottleInterface::setOnline(bool& value, bool simulation)
     m_kernel->stop();
     m_kernel.reset();
 
-    status.setValueInternal(InterfaceStatus::Offline);
+    setState(InterfaceState::Offline);
   }
 
   return true;

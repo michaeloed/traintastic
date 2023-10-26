@@ -32,8 +32,9 @@
 
 namespace Z21 {
 
-ClientKernel::ClientKernel(const ClientConfig& config, bool simulation)
-  : m_simulation{simulation}
+ClientKernel::ClientKernel(std::string logId_, const ClientConfig& config, bool simulation)
+  : Kernel(std::move(logId_))
+  , m_simulation{simulation}
   , m_keepAliveTimer(m_ioContext)
   , m_config{config}
 {
@@ -54,7 +55,7 @@ void ClientKernel::receive(const Message& message)
     EventLoop::call(
       [this, msg=toString(message)]()
       {
-        Log::log(m_logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId, LogMessage::D2002_RX_X, msg);
       });
 
   switch(message.header())
@@ -68,7 +69,7 @@ void ClientKernel::receive(const Message& message)
 
       switch(lanX.xheader)
       {
-        case 0x61:
+        case LAN_X_BC:
           if(message == LanXBCTrackPowerOff() || message == LanXBCTrackShortCircuit())
           {
             if(m_trackPowerOn != TriState::False)
@@ -99,7 +100,7 @@ void ClientKernel::receive(const Message& message)
           }
           break;
 
-        case 0x81:
+        case LAN_X_BC_STOPPED:
           if(message == LanXBCStopped())
           {
             if(m_emergencyStop != TriState::True)
@@ -221,17 +222,66 @@ void ClientKernel::receive(const Message& message)
       }
       break;
 
+    case LAN_GET_BROADCASTFLAGS:
+      if(message.dataLen() == sizeof(LanGetBroadcastFlagsReply))
+      {
+        const auto& reply = static_cast<const LanGetBroadcastFlagsReply&>(message);
+        m_broadcastFlags = reply.broadcastFlags();
+
+        if(m_broadcastFlags != requiredBroadcastFlags)
+        {
+            Log::log(logId, LogMessage::W2019_Z21_BROADCAST_FLAG_MISMATCH);
+        }
+      }
+      break;
+
+    case LAN_SYSTEMSTATE_DATACHANGED:
+    {
+      if(message.dataLen() == sizeof(LanSystemStateDataChanged))
+      {
+        const auto& reply = static_cast<const LanSystemStateDataChanged&>(message);
+
+        const bool isStop = reply.centralState & Z21_CENTRALSTATE_EMERGENCYSTOP;
+        const bool isTrackPowerOn = (reply.centralState & Z21_CENTRALSTATE_TRACKVOLTAGEOFF) == 0
+                                    && (reply.centralState & Z21_CENTRALSTATE_SHORTCIRCUIT) == 0;
+
+        const TriState trackPowerOn = toTriState(isTrackPowerOn);
+        if(m_trackPowerOn != trackPowerOn)
+        {
+          m_trackPowerOn = trackPowerOn;
+
+          if(m_onTrackPowerOnChanged)
+            EventLoop::call(
+              [this, isTrackPowerOn]()
+              {
+                m_onTrackPowerOnChanged(isTrackPowerOn);
+              });
+        }
+
+        if(m_emergencyStop != TriState::True && isStop)
+        {
+          m_emergencyStop = TriState::True;
+
+          if(m_onEmergencyStop)
+            EventLoop::call(
+              [this]()
+              {
+                m_onEmergencyStop();
+              });
+        }
+      }
+      break;
+    }
+
     case LAN_GET_CODE:
     case LAN_LOGOFF:
     case LAN_SET_BROADCASTFLAGS:
-    case LAN_GET_BROADCASTFLAGS:
     case LAN_GET_LOCO_MODE:
     case LAN_SET_LOCO_MODE:
     case LAN_GET_TURNOUTMODE:
     case LAN_SET_TURNOUTMODE:
     case LAN_RMBUS_GETDATA:
     case LAN_RMBUS_PROGRAMMODULE:
-    case LAN_SYSTEMSTATE_DATACHANGED:
     case LAN_SYSTEMSTATE_GETDATA:
     case LAN_RAILCOM_DATACHANGED:
     case LAN_RAILCOM_GETDATA:
@@ -279,13 +329,13 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
   if(has(changes, DecoderChangeFlags::EmergencyStop | DecoderChangeFlags::Direction | DecoderChangeFlags::Throttle | DecoderChangeFlags::SpeedSteps))
   {
     LanXSetLocoDrive cmd;
-    cmd.setAddress(decoder.address, decoder.longAddress);
+    cmd.setAddress(decoder.address, decoder.protocol == DecoderProtocol::DCCLong);
 
     switch(decoder.speedSteps)
     {
       case 14:
       {
-        const uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, 14);
+        const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 14);
         cmd.db0 = 0x10;
         if(decoder.emergencyStop)
           cmd.speedAndDirection = 0x01;
@@ -295,7 +345,7 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
       }
       case 28:
       {
-        uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, 28);
+        uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 28);
         cmd.db0 = 0x12;
         if(decoder.emergencyStop)
           cmd.speedAndDirection = 0x01;
@@ -310,7 +360,7 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
       case 128:
       default:
       {
-        const uint8_t speedStep = Decoder::throttleToSpeedStep(decoder.throttle, 126);
+        const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 126);
         cmd.db0 = 0x13;
         if(decoder.emergencyStop)
           cmd.speedAndDirection = 0x01;
@@ -332,7 +382,7 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
     if(functionNumber <= LanXSetLocoFunction::functionNumberMax)
       if(const auto& f = decoder.getFunction(functionNumber))
         postSend(LanXSetLocoFunction(
-          decoder.address, decoder.longAddress,
+          decoder.address, decoder.protocol == DecoderProtocol::DCCLong,
           static_cast<uint8_t>(functionNumber),
           f->value ? LanXSetLocoFunction::SwitchType::On : LanXSetLocoFunction::SwitchType::Off));
   }
@@ -435,6 +485,8 @@ void ClientKernel::simulateInputChange(uint32_t channel, uint32_t address, Simul
 void ClientKernel::onStart()
 {
   // reset all state values
+  m_broadcastFlags = BroadcastFlags::None;
+  m_broadcastFlagsRetryCount = 0;
   m_serialNumber = 0;
   m_hardwareType = HWT_UNKNOWN;
   m_firmwareVersionMajor = 0;
@@ -447,12 +499,7 @@ void ClientKernel::onStart()
   send(LanGetSerialNumber());
   send(LanGetHardwareInfo());
 
-  send(LanSetBroadcastFlags(
-    BroadcastFlags::PowerLocoTurnoutChanges |
-    BroadcastFlags::RBusChanges |
-    BroadcastFlags::SystemStatusChanges |
-    BroadcastFlags::AllLocoChanges | // seems not to work with DR5000
-    BroadcastFlags::LocoNetDetector));
+  send(LanSetBroadcastFlags(requiredBroadcastFlags));
 
   send(LanGetBroadcastFlags());
 
@@ -474,7 +521,7 @@ void ClientKernel::send(const Message& message)
       EventLoop::call(
         [this, msg=toString(message)]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
   else
@@ -483,8 +530,24 @@ void ClientKernel::send(const Message& message)
 
 void ClientKernel::startKeepAliveTimer()
 {
-  assert(ClientConfig::keepAliveInterval > 0);
-  m_keepAliveTimer.expires_after(boost::asio::chrono::seconds(ClientConfig::keepAliveInterval));
+  if(m_broadcastFlags == BroadcastFlags::None && m_broadcastFlagsRetryCount == maxBroadcastFlagsRetryCount)
+  {
+    Log::log(logId, LogMessage::W2019_Z21_BROADCAST_FLAG_MISMATCH);
+    m_broadcastFlagsRetryCount++; //Log only once
+  }
+
+  if(m_broadcastFlags == BroadcastFlags::None && m_broadcastFlagsRetryCount < maxBroadcastFlagsRetryCount)
+  {
+    //Request BC flags as keep alive message
+    m_keepAliveTimer.expires_after(boost::asio::chrono::seconds(2));
+  }
+  else
+  {
+    //Normal keep alive
+    assert(ClientConfig::keepAliveInterval > 0);
+    m_keepAliveTimer.expires_after(boost::asio::chrono::seconds(ClientConfig::keepAliveInterval));
+  }
+
   m_keepAliveTimer.async_wait(std::bind(&ClientKernel::keepAliveTimerExpired, this, std::placeholders::_1));
 }
 
@@ -493,7 +556,18 @@ void ClientKernel::keepAliveTimerExpired(const boost::system::error_code& ec)
   if(ec)
     return;
 
-  send(LanSystemStateGetData());
+  if(m_broadcastFlags == BroadcastFlags::None)
+  {
+    //Request BC flags as keep alive message
+    m_broadcastFlagsRetryCount++;
+    send(LanSetBroadcastFlags(requiredBroadcastFlags));
+    send(LanGetBroadcastFlags());
+  }
+  else
+  {
+    //Normal keep alive
+    send(LanSystemStateGetData());
+  }
 
   startKeepAliveTimer();
 }

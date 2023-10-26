@@ -25,6 +25,10 @@
 
 #include <cstdint>
 
+#ifdef QT_CORE_LIB
+  #include <QString>
+#endif
+
 struct LogMessageOffset
 {
   static constexpr uint32_t blockSize = 1'000'000;
@@ -51,6 +55,9 @@ struct LogMessageOffset
 enum class LogMessage : uint32_t
 {
   // Debug:
+#ifdef ENABLE_LOG_DEBUG
+  D0000_X = LogMessageOffset::debug,
+#endif
   D1001_RESUME_X_MULTIPLIER_X = LogMessageOffset::debug + 1001,
   D1002_TICK_X_ERROR_X_US = LogMessageOffset::debug + 1002,
   D1003_FREEZE_X = LogMessageOffset::debug + 1003,
@@ -69,12 +76,13 @@ enum class LogMessage : uint32_t
   // Info:
   I1001_TRAINTASTIC_VX = LogMessageOffset::info + 1001,
   I1002_SETTING_FILE_NOT_FOUND_USING_DEFAULTS = LogMessageOffset::info + 1002,
-  I1003_CLIENT_CONNECTED = LogMessageOffset::info + 1003,
+  I1003_NEW_CONNECTION = LogMessageOffset::info + 1003,
   I1004_CONNECTION_LOST = LogMessageOffset::info + 1004,
   I1005_BUILDING_WORLD_INDEX = LogMessageOffset::info + 1005,
   I1006_X = LogMessageOffset::info + 1006, //!< boost version
   I1007_X = LogMessageOffset::info + 1007, //!< nlohmann::json version
   I1008_X = LogMessageOffset::info + 1008, //!< LibArchive version
+  I1009_ZLIB_X = LogMessageOffset::info + 1009, //!< zlib version
   I2001_UNKNOWN_LOCO_ADDRESS_X = LogMessageOffset::info + 2001,
   I2002_HARDWARE_TYPE_X = LogMessageOffset::info + 2002,
   I2003_FIRMWARE_VERSION_X = LogMessageOffset::info + 2003,
@@ -111,9 +119,15 @@ enum class LogMessage : uint32_t
   N1024_SIMULATION_ENABLED = LogMessageOffset::notice + 1024,
   N1025_EXPORTED_WORLD_SUCCESSFULLY = LogMessageOffset::notice + 1025,
   N1026_IMPORTED_WORLD_SUCCESSFULLY = LogMessageOffset::notice + 1026,
+  N1027_LOADED_WORLD_X = LogMessageOffset::notice + 1027,
+  N1028_CLOSED_WORLD = LogMessageOffset::notice + 1028,
   N2001_SIMULATION_NOT_SUPPORTED = LogMessageOffset::notice + 2001,
   N2002_NO_RESPONSE_FROM_LNCV_MODULE_X_WITH_ADDRESS_X = LogMessageOffset::notice + 2002,
   N2003_STOPPED_SENDING_FAST_CLOCK_SYNC = LogMessageOffset::notice + 2003,
+  N2004_STARTING_PCAP_FILE_LOG_X = LogMessageOffset::notice + 2004,
+  N2005_STARTING_PCAP_LOG_PIPE_X = LogMessageOffset::notice + 2005,
+  N2006_LISTEN_ONLY_MODE_ACTIVATED = LogMessageOffset::notice + 2006,
+  N2007_LISTEN_ONLY_MODE_DEACTIVATED = LogMessageOffset::notice + 2007,
   N3001_ASSIGNED_TRAIN_X_TO_BLOCK_X = LogMessageOffset::notice + 3001,
   N3002_REMOVED_TRAIN_X_FROM_BLOCK_X = LogMessageOffset::notice + 3002,
   N9001_STARTING_SCRIPT = LogMessageOffset::notice + 9001,
@@ -125,12 +139,15 @@ enum class LogMessage : uint32_t
   W1003_READING_WORLD_X_FAILED_LIBARCHIVE_ERROR_X_X = LogMessageOffset::warning + 1003,
   W2001_RECEIVED_MALFORMED_DATA_DROPPED_X_BYTES = LogMessageOffset::warning + 2001,
   W2002_COMMAND_STATION_DOESNT_SUPPORT_FUNCTIONS_ABOVE_FX = LogMessageOffset::warning + 2002,
-  W2003_COMMAND_STATION_DOESNT_SUPPORT_X_SPEEDSTEPS_USING_X = LogMessageOffset::warning + 2003,
   W2004_INPUT_ADDRESS_X_IS_INVALID = LogMessageOffset::warning + 2004,
   W2005_OUTPUT_ADDRESS_X_IS_INVALID = LogMessageOffset::warning + 2005,
   W2006_COMMAND_STATION_DOES_NOT_SUPPORT_LOCO_SLOT_X = LogMessageOffset::warning + 2006,
   W2007_COMMAND_STATION_DOES_NOT_SUPPORT_THE_FAST_CLOCK_SLOT = LogMessageOffset::warning + 2007,
   W2018_TIMEOUT_NO_ECHO_WITHIN_X_MS = LogMessageOffset::warning + 2018,
+  W2019_Z21_BROADCAST_FLAG_MISMATCH = LogMessageOffset::warning + 2019,
+  W3001_NX_BUTTON_CONNECTED_TO_TWO_BLOCKS = LogMessageOffset::warning + 3001,
+  W3002_NX_BUTTON_NOT_CONNECTED_TO_ANY_BLOCK = LogMessageOffset::warning + 3002,
+  W9001_EXECUTION_TOOK_X_US = LogMessageOffset::warning + 9001,
   W9999_X = LogMessageOffset::warning + 9999,
 
   // Error:
@@ -162,12 +179,18 @@ enum class LogMessage : uint32_t
   E2018_TIMEOUT_NO_ECHO_WITHIN_X_MS = LogMessageOffset::error + 2018,
   E2019_TIMEOUT_NO_RESPONSE_WITHIN_X_MS = LogMessageOffset::error + 2019,
   E2020_TOTAL_NUMBER_OF_MODULES_MAY_NOT_EXCEED_X  = LogMessageOffset::error + 2020,
+  E2021_STARTING_PCAP_LOG_FAILED_X = LogMessageOffset::error + 2021,
+  E2022_SOCKET_CREATE_FAILED_X = LogMessageOffset::error + 2022,
+  E2023_SOCKET_IOCTL_FAILED_X = LogMessageOffset::error + 2023,
+  E2024_UNKNOWN_LOCOMOTIVE_MFX_UID_X = LogMessageOffset::error + 2024,
+  E3001_CANT_DELETE_RAIL_VEHICLE_WHEN_IN_ACTIVE_TRAIN = LogMessageOffset::error + 3001,
+  E3002_CANT_DELETE_ACTIVE_TRAIN = LogMessageOffset::error + 3002,
   E9001_X_DURING_EXECUTION_OF_X_EVENT_HANDLER = LogMessageOffset::error + 9001,
   E9999_X = LogMessageOffset::error + 9999,
 
   // Critical:
   C1001_LOADING_WORLD_FAILED_X = LogMessageOffset::critical + 1001,
-  C1002_CREATING_CLIENT_FAILED_X = LogMessageOffset::critical + 1002,
+  C1002_CREATING_CONNECTION_FAILED_X = LogMessageOffset::critical + 1002,
   C1003_CANT_WRITE_TO_SETTINGS_FILE_X = LogMessageOffset::critical + 1003,
   C1004_READING_WORLD_FAILED_X_X = LogMessageOffset::critical + 1004,
   C1005_SAVING_WORLD_FAILED_X = LogMessageOffset::critical + 1005,
@@ -179,10 +202,15 @@ enum class LogMessage : uint32_t
   C1011_IMPORTING_WORLD_FAILED_X = LogMessageOffset::critical + 1011,
   C1012_UNKNOWN_CLASS_X_CANT_RECREATE_OBJECT_X = LogMessageOffset::critical + 1012,
   C1013_CANT_LOAD_WORLD_SAVED_WITH_NEWER_VERSION_REQUIRES_AT_LEAST_X = LogMessageOffset::critical + 1013,
+  C1014_INVALID_COMMAND = LogMessageOffset::critical + 1014,
+  C1015_UNKNOWN_OBJECT = LogMessageOffset::critical + 1015,
+  C1016_UNKNOWN_PROPERTY = LogMessageOffset::critical + 1016,
+  C1017_INVALID_INDICES = LogMessageOffset::critical + 1017,
+  C1018_EXCEPTION_X = LogMessageOffset::critical + 1018,
+  C1019_OBJECT_NOT_A_TABLE = LogMessageOffset::critical + 1019,
   C2001_ADDRESS_ALREADY_USED_AT_X = LogMessageOffset::critical + 2001,
-  C2002_DCCPLUSPLUS_ONLY_SUPPORTS_THE_DCC_PROTOCOL = LogMessageOffset::critical + 2002,
-  C2003_DCCPLUSPLUS_DOESNT_SUPPORT_DCC_LONG_ADDRESSES_BELOW_128 = LogMessageOffset::critical + 2003,
   C2004_CANT_GET_FREE_SLOT = LogMessageOffset::critical + 2004,
+  C2005_SOCKETCAN_IS_ONLY_AVAILABLE_ON_LINUX = LogMessageOffset::critical + 2005,
   C9999_X = LogMessageOffset::critical + 9999,
 
   // Fatal:
@@ -193,6 +221,7 @@ enum class LogMessage : uint32_t
   F1005_OPENING_UDP_SOCKET_FAILED_X = LogMessageOffset::fatal + 1005,
   F1006_UDP_SOCKET_ADDRESS_REUSE_FAILED_X = LogMessageOffset::fatal + 1006,
   F1007_BINDING_UDP_SOCKET_FAILED_X = LogMessageOffset::fatal + 1007,
+  F1008_EVENTLOOP_CRASHED_X = LogMessageOffset::fatal + 1008,
   F9001_CREATING_LUA_STATE_FAILED = LogMessageOffset::fatal + 9001,
   F9002_RUNNING_SCRIPT_FAILED_X = LogMessageOffset::fatal + 9002,
   F9003_CALLING_FUNCTION_FAILED_X = LogMessageOffset::fatal + 9003,
@@ -258,5 +287,12 @@ constexpr uint32_t logMessageNumber(LogMessage message)
 {
   return static_cast<std::underlying_type_t<decltype(message)>>(message) % LogMessageOffset::blockSize;
 }
+
+#ifdef QT_CORE_LIB
+inline QString logMessageCode(LogMessage message)
+{
+  return QString(logMessageChar(message)).append(QString::number(logMessageNumber(message)).rightJustified(4, '0'));
+}
+#endif
 
 #endif

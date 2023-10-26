@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/signals2/signal.hpp>
+#include <traintastic/enum/tristate.hpp>
 #include "messages.hpp"
 
 class DecoderList;
@@ -62,7 +63,7 @@ class ServerKernel final : public Kernel
     TriState m_emergencyStop = TriState::Undefined;
     std::function<void()> m_onEmergencyStop;
 
-    ServerKernel(const ServerConfig& config, std::shared_ptr<DecoderList> decoderList);
+    ServerKernel(std::string logId_, const ServerConfig& config, std::shared_ptr<DecoderList> decoderList);
 
     void onStart() final;
     void onStop() final;
@@ -100,10 +101,10 @@ class ServerKernel final : public Kernel
      * @return The kernel instance
      */
     template<class IOHandlerType, class... Args>
-    static std::unique_ptr<ServerKernel> create(const ServerConfig& config, std::shared_ptr<DecoderList> decoderList, Args... args)
+    static std::unique_ptr<ServerKernel> create(std::string logId_, const ServerConfig& config, std::shared_ptr<DecoderList> decoderList, Args... args)
     {
       static_assert(std::is_base_of_v<IOHandler, IOHandlerType>);
-      std::unique_ptr<ServerKernel> kernel{new ServerKernel(config, std::move(decoderList))};
+      std::unique_ptr<ServerKernel> kernel{new ServerKernel(std::move(logId_), config, std::move(decoderList))};
       kernel->setIOHandler(std::make_unique<IOHandlerType>(*kernel, std::forward<Args>(args)...));
       return kernel;
     }

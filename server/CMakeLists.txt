@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 include(../shared/traintastic.cmake)
 project(traintastic-server VERSION ${TRAINTASTIC_VERSION} DESCRIPTION "Traintastic server")
 include(GNUInstallDirs)
+include(../shared/translations/traintastic-lang.cmake)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -15,12 +16,12 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Werror)
 endif()
 
-if(NOT DISABLE_CLANG_TIDY)
+if(ENABLE_CLANG_TIDY)
   set(CMAKE_CXX_CLANG_TIDY clang-tidy -checks=-*,readability-*,-readability-braces-around-statements,-readability-implicit-bool-conversion,-readability-magic-numbers)
 endif()
 
-add_executable(traintastic-server src/main.cpp src/options.hpp)
-add_executable(traintastic-server-test test/main.cpp)
+add_executable(traintastic-server src/main.cpp src/options.hpp ${TRANSLATION_FILES})
+add_executable(traintastic-server-test test/main.cpp ${TRANSLATION_FILES})
 
 target_compile_definitions(traintastic-server-test PRIVATE -DTRAINTASTIC_TEST)
 
@@ -50,6 +51,8 @@ file(GLOB SOURCES
   "src/board/list/*.cpp"
   "src/board/map/*.hpp"
   "src/board/map/*.cpp"
+  "src/board/nx/*.hpp"
+  "src/board/nx/*.cpp"
   "src/board/tile/*.hpp"
   "src/board/tile/*.cpp"
   "src/board/tile/misc/*.hpp"
@@ -83,6 +86,8 @@ file(GLOB SOURCES
   "src/hardware/input/monitor/*.cpp"
   "src/hardware/interface/*.hpp"
   "src/hardware/interface/*.cpp"
+  "src/hardware/interface/marklincan/*.hpp"
+  "src/hardware/interface/marklincan/*.cpp"
   "src/hardware/output/*.hpp"
   "src/hardware/output/*.cpp"
   "src/hardware/output/keyboard/*.hpp"
@@ -93,6 +98,8 @@ file(GLOB SOURCES
   "src/hardware/output/map/*.cpp"
   "src/hardware/programming/lncv/*.hpp"
   "src/hardware/programming/lncv/*.cpp"
+  "src/hardware/protocol/*.hpp"
+  "src/hardware/protocol/*.cpp"
   "src/hardware/protocol/dccplusplus/*.hpp"
   "src/hardware/protocol/dccplusplus/*.cpp"
   "src/hardware/protocol/dccplusplus/iohandler/*.hpp"
@@ -111,6 +118,12 @@ file(GLOB SOURCES
   "src/hardware/protocol/loconet/message/uhlenbrock/*.cpp"
   "src/hardware/protocol/loconet/iohandler/*.hpp"
   "src/hardware/protocol/loconet/iohandler/*.cpp"
+  "src/hardware/protocol/marklincan/*.hpp"
+  "src/hardware/protocol/marklincan/*.cpp"
+  "src/hardware/protocol/marklincan/iohandler/*.hpp"
+  "src/hardware/protocol/marklincan/iohandler/*.cpp"
+  "src/hardware/protocol/marklincan/message/*.hpp"
+  "src/hardware/protocol/marklincan/message/*.cpp"
   "src/hardware/protocol/traintasticdiy/*.hpp"
   "src/hardware/protocol/traintasticdiy/*.cpp"
   "src/hardware/protocol/traintasticdiy/iohandler/*.hpp"
@@ -135,10 +148,16 @@ file(GLOB SOURCES
   "src/log/*.cpp"
   "src/lua/*.hpp"
   "src/lua/*.cpp"
+  "src/lua/object/*.hpp"
+  "src/lua/object/*.cpp"
   "src/network/*.hpp"
   "src/network/*.cpp"
   "src/os/*.hpp"
   "src/os/*.cpp"
+  "src/pcap/*.hpp"
+  "src/pcap/*.cpp"
+  "src/status/*.hpp"
+  "src/status/*.cpp"
   "src/train/*.hpp"
   "src/train/*.cpp"
   "src/traintastic/*.hpp"
@@ -159,13 +178,17 @@ file(GLOB TEST_SOURCES
   "test/hardware/*.cpp"
   "test/lua/*.cpp"
   "test/lua/script/*.cpp"
+  "test/train/*.cpp"
   "test/objectcreatedestroy.cpp"
   )
+
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DENABLE_LOG_DEBUG")
 
 ### PLATFORM ###
 
 if(UNIX AND NOT APPLE)
   set(LINUX TRUE)
+  list(APPEND SOURCES "src/os/linux/setbaudrate.hpp" "src/os/linux/setbaudrate.cpp")
 endif()
 
 if(UNIX)
@@ -184,6 +207,10 @@ if(LINUX)
     target_link_libraries(traintastic-server PRIVATE PkgConfig::LIBSYSTEMD)
     target_link_libraries(traintastic-server-test PRIVATE PkgConfig::LIBSYSTEMD)
   endif()
+else()
+  # socket CAN is only available on linux:
+  file(GLOB SOCKET_CAN_SOURCES "src/hardware/protocol/marklincan/iohandler/socketcaniohandler.*")
+  list(REMOVE_ITEM SOURCES ${SOCKET_CAN_SOURCES})
 endif()
 
 if(WIN32)
@@ -262,6 +289,32 @@ else()
   file(GLOB SOURCES_BOOST "thirdparty/boost/libs/program_options/src/*.cpp")
   list(APPEND SOURCES ${SOURCES_BOOST})
 endif()
+
+# zlib
+if(WIN32)
+  set(ZLIB_INCLUDE_DIRS "thirdparty/zlib/include")
+
+  if(MSVC)
+      set(ZLIB_LIBRARIES zlib1)
+      add_custom_command(TARGET traintastic-server PRE_LINK
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/zlib/bin/zlib1.def" /out:zlib1.lib /machine:x64)
+      add_custom_command(TARGET traintastic-server-test PRE_LINK
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/zlib/bin/zlib1.def" /out:zlib1.lib /machine:x64)
+  else()
+      # MinGW can directly link .dll without import lib
+      set(ZLIB_LIBRARIES "${PROJECT_SOURCE_DIR}/thirdparty/zlib/bin/zlib1.dll")
+  endif()
+
+  # copy zlib1.dll to build directory:
+  add_custom_command(TARGET traintastic-server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/zlib/bin/zlib1.dll" .)
+else()
+  find_package(ZLIB REQUIRED)
+endif()
+target_include_directories(traintastic-server PRIVATE ${ZLIB_INCLUDE_DIRS})
+target_link_libraries(traintastic-server PRIVATE ${ZLIB_LIBRARIES})
+target_include_directories(traintastic-server-test PRIVATE ${ZLIB_INCLUDE_DIRS})
+target_link_libraries(traintastic-server-test PRIVATE ${ZLIB_LIBRARIES})
 
 # libarchive
 if(WIN32)

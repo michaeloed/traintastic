@@ -21,13 +21,17 @@
  */
 
 #include "output.hpp"
+#include "outputcontroller.hpp"
 #include "list/outputlist.hpp"
 #include "../../world/world.hpp"
 #include "list/outputlisttablemodel.hpp"
 #include "../../core/attributes.hpp"
+#include "../../core/method.tpp"
 #include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../utils/displayname.hpp"
+
+CREATE_IMPL(Output)
 
 Output::Output(World& world, std::string_view _id)
   : IdObject(world, _id)
@@ -170,7 +174,7 @@ void Output::updateValue(TriState _value)
 {
   value.setValueInternal(_value);
   if(value != TriState::Undefined)
-    fireEvent(onValueChanged, value == TriState::True);
+    fireEvent<bool, const std::shared_ptr<Output>&>(onValueChanged, value == TriState::True, shared_ptr<Output>());
 }
 
 void Output::interfaceChanged()

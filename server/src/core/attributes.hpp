@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,9 +26,11 @@
 #include "interfaceitem.hpp"
 #include "abstractobjectproperty.hpp"
 #include "method.hpp"
+#include "object.hpp"
 #include "property.hpp"
 #include "unitproperty.hpp"
 #include "vectorproperty.hpp"
+#include <tcb/span.hpp>
 
 struct Attributes
 {
@@ -101,6 +103,12 @@ struct Attributes
     property.addAttribute(AttributeName::Max, max);
   }
 
+  template<typename T>
+  static inline void addMinMax(Property<T>& property, std::pair<T, T> range)
+  {
+    addMinMax(property, range.first, range.second);
+  }
+
   template<class T, class Unit>
   static inline void addMinMax(UnitProperty<T, Unit>& property, T min, T max, Unit unit)
   {
@@ -145,6 +153,12 @@ struct Attributes
     property.setAttribute(AttributeName::Max, max);
   }
 
+  template<typename T>
+  static inline void setMinMax(Property<T>& property, std::pair<T, T> range)
+  {
+    setMinMax(property, range.first, range.second);
+  }
+
   template<class T, class Unit>
   static inline void setMinMax(UnitProperty<T, Unit>& property, T min, T max, Unit unit)
   {
@@ -161,6 +175,12 @@ struct Attributes
   static inline void setVisible(InterfaceItem& item, bool value)
   {
     item.setAttribute(AttributeName::Visible, value);
+  }
+
+  static inline void setVisible(std::initializer_list<std::reference_wrapper<InterfaceItem>> items, bool value)
+  {
+    for(auto& item : items)
+      item.get().setAttribute(AttributeName::Visible, value);
   }
 
   static inline void addObjectEditor(InterfaceItem& item, bool value)
@@ -180,6 +200,12 @@ struct Attributes
   static inline void addValues(Method<R(T)>& method, const std::array<T, N>& values)
   {
     method.addAttribute(AttributeName::Values, values);
+  }
+
+  template<typename T>
+  static inline void addValues(Property<T>& property, tcb::span<const T> values)
+  {
+    property.addAttribute(AttributeName::Values, values);
   }
 
   template<typename T, size_t N>
@@ -216,6 +242,12 @@ struct Attributes
   static inline void addValues(Method<R(T)>& method, std::vector<T> values)
   {
     method.addAttribute(AttributeName::Values, std::move(values));
+  }
+
+  template<typename T>
+  static inline void setValues(Property<T>& property, tcb::span<const T> values)
+  {
+    property.setAttribute(AttributeName::Values, values);
   }
 
   template<typename T>

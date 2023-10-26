@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021 Reinder Feenstra
+ * Copyright (C) 2021,2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -58,6 +58,18 @@ BlockInputMapItem::BlockInputMapItem(BlockInputMap& parent, uint32_t itemId) :
       if(input)
         inputPropertyChanged(input->value);
     }}
+  , identification{this, "identification", nullptr, PropertyFlags::ReadWrite | PropertyFlags::Store,
+      nullptr,
+      [this](const std::shared_ptr<Identification>& value)
+      {
+        if(identification)
+          disconnectIdentification(*identification);
+
+        if(value)
+          connectIdentification(*value);
+
+        return true;
+      }}
 {
   auto& world = getWorld(m_parent);
   const bool editable = contains(world.state.value(), WorldState::Edit);
@@ -74,6 +86,18 @@ BlockInputMapItem::BlockInputMapItem(BlockInputMap& parent, uint32_t itemId) :
   m_interfaceItems.add(type);
   Attributes::addEnabled(invert, editable && stopped);
   m_interfaceItems.add(invert);
+  Attributes::addEnabled(identification, editable && stopped);
+  Attributes::addObjectList(identification, world.identifications);
+  m_interfaceItems.add(identification);
+}
+
+BlockInputMapItem::~BlockInputMapItem()
+{
+  assert(!input);
+  assert(!m_inputPropertyChanged.connected());
+  assert(!m_inputDestroying.connected());
+  assert(!identification);
+  assert(!m_identificationDestroying.connected());
 }
 
 std::string BlockInputMapItem::getObjectId() const
@@ -93,6 +117,15 @@ void BlockInputMapItem::loaded()
 
   if(input)
     connectInput(*input);
+  if(identification)
+    connectIdentification(*identification);
+}
+
+void BlockInputMapItem::destroying()
+{
+  input = nullptr;
+  identification = nullptr;
+  InputMapItem::destroying();
 }
 
 void BlockInputMapItem::worldEvent(WorldState state, WorldEvent event)
@@ -106,6 +139,7 @@ void BlockInputMapItem::worldEvent(WorldState state, WorldEvent event)
   Attributes::setEnabled(input, editable && stopped);
   Attributes::setEnabled(type, false/*editable && stopped*/);
   Attributes::setEnabled(invert, editable && stopped);
+  Attributes::setEnabled(identification, editable && stopped);
 }
 
 void BlockInputMapItem::connectInput(Input& object)
@@ -132,6 +166,29 @@ void BlockInputMapItem::inputPropertyChanged(BaseProperty& property)
   assert(input);
   if(&property == static_cast<BaseProperty*>(&input->value))
     setValue(toSensorState(type, input->value.value() ^ invert.value()));
+}
+
+void BlockInputMapItem::connectIdentification(Identification& object)
+{
+  object.consumers.appendInternal(m_parent.parent().shared_from_this());
+  m_identificationDestroying = object.onDestroying.connect(
+    [this]([[maybe_unused]] Object& obj)
+    {
+      assert(identification.value().get() == &obj);
+      identification = nullptr;
+    });
+  m_identificationEvent = object.onEvent.connect(
+    [this](IdentificationEventType eventType, uint16_t identifier, Direction direction, uint8_t category)
+    {
+      static_cast<BlockRailTile&>(m_parent.parent()).identificationEvent(*this, eventType, identifier, direction, category);
+    });
+}
+
+void BlockInputMapItem::disconnectIdentification(Identification& object)
+{
+  m_identificationEvent.disconnect();
+  m_identificationDestroying.disconnect();
+  object.consumers.removeInternal(m_parent.parent().shared_from_this());
 }
 
 void BlockInputMapItem::setValue(SensorState value)

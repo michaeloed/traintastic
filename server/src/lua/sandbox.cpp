@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2022 Reinder Feenstra
+ * Copyright (C) 2019-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -22,7 +22,6 @@
 
 #include "sandbox.hpp"
 #include "push.hpp"
-#include "object.hpp"
 #include "method.hpp"
 #include "event.hpp"
 #include "eventhandler.hpp"
@@ -30,10 +29,12 @@
 #include "class.hpp"
 #include "to.hpp"
 #include "type.hpp"
+#include "object.hpp"
 #include "enums.hpp"
 #include "sets.hpp"
 #include "getversion.hpp"
 #include "script.hpp"
+#include "vectorproperty.hpp"
 #include <version.hpp>
 #include <traintastic/utils/str.hpp>
 #include "../world/world.hpp"
@@ -162,7 +163,8 @@ SandboxPtr Sandbox::create(Script& script)
   // register types:
   Enums::registerTypes<LUA_ENUMS>(L);
   Sets::registerTypes<LUA_SETS>(L);
-  Object::registerType(L);
+  Object::registerTypes(L);
+  VectorProperty::registerType(L);
   Method::registerType(L);
   Event::registerType(L);
 
@@ -286,7 +288,43 @@ int Sandbox::pcall(lua_State* L, int nargs, int nresults, int errfunc)
       return LUA_ERRRUN;
     }
   }
-  return lua_pcall(L, nargs, nresults, errfunc);
+
+  // limit execution time:
+  // Only start for first pcall, a pcall can cause another pcall.
+  const bool firstCall = lua_gethook(L) == nullptr;
+  if(firstCall)
+  {
+    auto& stateData = getStateData(L);
+    stateData.pcallStart = std::chrono::steady_clock::now();
+    stateData.pcallExecutionTimeViolation = false;
+    lua_sethook(L, hook, LUA_MASKCOUNT, 1000);
+  }
+
+  const int r = lua_pcall(L, nargs, nresults, errfunc);
+
+  if(firstCall)
+  {
+    if(!getStateData(L).pcallExecutionTimeViolation)
+    {
+      const auto duration = (std::chrono::steady_clock::now() - getStateData(L).pcallStart);
+      if(duration >= pcallDurationWarning)
+      {
+        ::Log::log(getStateData(L).script(), LogMessage::W9001_EXECUTION_TOOK_X_US, std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+      }
+    }
+    lua_sethook(L, nullptr, 0, 0);
+  }
+
+  return r;
+}
+
+void Sandbox::hook(lua_State* L, lua_Debug* /*ar*/)
+{
+  if((std::chrono::steady_clock::now() - getStateData(L).pcallStart) > pcallDurationMax)
+  {
+    getStateData(L).pcallExecutionTimeViolation = true;
+    luaL_error(L, "Exceeded maximum execution time.");
+  }
 }
 
 Sandbox::StateData::~StateData()

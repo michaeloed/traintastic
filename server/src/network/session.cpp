@@ -24,7 +24,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include "../traintastic/traintastic.hpp"
-#include "client.hpp"
+#include "connection.hpp"
 #include <traintastic/enum/interfaceitemtype.hpp>
 #include <traintastic/enum/attributetype.hpp>
 #ifndef NDEBUG
@@ -33,6 +33,7 @@
 #include "../core/objectproperty.tpp"
 #include "../core/tablemodel.hpp"
 #include "../log/log.hpp"
+#include "../log/logmessageexception.hpp"
 #include "../log/memorylogger.hpp"
 #include "../board/board.hpp"
 #include "../board/tile/tiles.hpp"
@@ -43,8 +44,8 @@
   #undef GetObject // GetObject is defined by a winapi header
 #endif
 
-Session::Session(const std::shared_ptr<Client>& client) :
-  m_client{client},
+Session::Session(const std::shared_ptr<Connection>& connection) :
+  m_connection{connection},
   m_uuid{boost::uuids::random_generator()()}
 {
   assert(isEventLoopThread());
@@ -104,11 +105,12 @@ bool Session::processMessage(const Message& message)
       {
         auto response = Message::newResponse(message.command(), message.requestId());
         writeObject(*response, obj);
-        m_client->sendMessage(std::move(response));
+        m_connection->sendMessage(std::move(response));
       }
       else
-        m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), Message::ErrorCode::UnknownObject));
-
+      {
+        m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1015_UNKNOWN_OBJECT));
+      }
       return true;
     }
     case Message::Command::ReleaseObject:
@@ -121,11 +123,18 @@ bool Session::processMessage(const Message& message)
       if(counter == m_handles.getCounter(handle))
       {
         m_handles.removeHandle(handle);
-        m_objectSignals.erase(handle);
+
+        auto it = m_objectSignals.find(handle);
+        while(it != m_objectSignals.end())
+        {
+          it->second.disconnect();
+          m_objectSignals.erase(it);
+          it = m_objectSignals.find(handle);
+        }
 
         auto event = Message::newEvent(message.command(), sizeof(Handle));
         event->write(handle);
-        m_client->sendMessage(std::move(event));
+        m_connection->sendMessage(std::move(event));
       }
       break;
     }
@@ -164,19 +173,25 @@ bool Session::processMessage(const Message& message)
             catch(const std::exception& e) // set property failed
             {
               if(message.isRequest()) // send error response
-                m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), e.what()));
+              {
+                m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1018_EXCEPTION_X, e.what()));
+              }
               else // send changed event with current value:
                 objectPropertyChanged(*property);
             }
 
             if(message.isRequest()) // send success response
-              m_client->sendMessage(Message::newResponse(message.command(), message.requestId()));
+              m_connection->sendMessage(Message::newResponse(message.command(), message.requestId()));
           }
           else if(message.isRequest()) // send error response
-            m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), "unknown property"));
+          {
+            m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1016_UNKNOWN_PROPERTY));
+          }
         }
         else if(message.isRequest()) // send error response
-          m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), "unknown object"));
+        {
+          m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1015_UNKNOWN_OBJECT));
+        }
       }
       return true;
     }
@@ -210,16 +225,46 @@ bool Session::processMessage(const Message& message)
             {
               auto response = Message::newResponse(message.command(), message.requestId());
               writeObject(*response, obj);
-              m_client->sendMessage(std::move(response));
+              m_connection->sendMessage(std::move(response));
             }
             else
-              m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), Message::ErrorCode::UnknownObject));
+              m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1015_UNKNOWN_OBJECT));
           }
           else // send error response
-            m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), "unknown property"));
+            m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1016_UNKNOWN_PROPERTY));
         }
         else // send error response
-          m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), "unknown object"));
+          m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1015_UNKNOWN_OBJECT));
+
+        return true;
+      }
+      break;
+
+    case Message::Command::ObjectGetObjectVectorPropertyObject:
+      if(message.isRequest())
+      {
+        if(ObjectPtr object = m_handles.getItem(message.read<Handle>()))
+        {
+          if(auto* property = object->getVectorProperty(message.read<std::string>()); property && !property->isInternal())
+          {
+            const size_t startIndex = message.read<uint32_t>();
+            const size_t endIndex = message.read<uint32_t>();
+
+            if(endIndex >= startIndex && endIndex < property->size())
+            {
+              auto response = Message::newResponse(message.command(), message.requestId());
+              for(size_t i = startIndex; i <= endIndex; i++)
+                writeObject(*response, property->getObject(i));
+              m_connection->sendMessage(std::move(response));
+            }
+            else // send error response
+              m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1017_INVALID_INDICES));
+          }
+          else // send error response
+            m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1016_UNKNOWN_PROPERTY));
+        }
+        else // send error response
+          m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1015_UNKNOWN_OBJECT));
 
         return true;
       }
@@ -344,15 +389,28 @@ bool Session::processMessage(const Message& message)
                   break;
               }
 
-              m_client->sendMessage(std::move(response));
+              m_connection->sendMessage(std::move(response));
               return true;
+            }
+          }
+          catch(const LogMessageException& e)
+          {
+            if(message.isRequest())
+            {
+              m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), e.message(), e.args()));
+              return true;
+            }
+            else
+            {
+              // we can't report it back to the caller, so just log it.
+              Log::log(*object, e.message(), e.args());
             }
           }
           catch(const std::exception& e)
           {
             if(message.isRequest())
             {
-              m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), Message::ErrorCode::Failed));
+              m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1018_EXCEPTION_X, e.what()));
               return true;
             }
           }
@@ -370,7 +428,7 @@ bool Session::processMessage(const Message& message)
           assert(model);
           auto response = Message::newResponse(message.command(), message.requestId());
           writeTableModel(*response, model);
-          m_client->sendMessage(std::move(response));
+          m_connection->sendMessage(std::move(response));
 
           model->columnHeadersChanged = [this](const TableModelPtr& tableModel)
             {
@@ -379,7 +437,7 @@ bool Session::processMessage(const Message& message)
               event->write(tableModel->columnCount());
               for(const auto& text : tableModel->columnHeaders())
                 event->write(text);
-              m_client->sendMessage(std::move(event));
+              m_connection->sendMessage(std::move(event));
             };
 
           model->rowCountChanged = [this](const TableModelPtr& tableModel)
@@ -387,7 +445,7 @@ bool Session::processMessage(const Message& message)
               auto event = Message::newEvent(Message::Command::TableModelRowCountChanged);
               event->write(m_handles.getHandle(std::dynamic_pointer_cast<Object>(tableModel)));
               event->write(tableModel->rowCount());
-              m_client->sendMessage(std::move(event));
+              m_connection->sendMessage(std::move(event));
             };
 
           model->updateRegion = [this](const TableModelPtr& tableModel, const TableModel::Region& region)
@@ -403,13 +461,13 @@ bool Session::processMessage(const Message& message)
                 for(uint32_t column = region.columnMin; column <= region.columnMax; column++)
                   event->write(tableModel->getText(column, row));
 
-              m_client->sendMessage(std::move(event));
+              m_connection->sendMessage(std::move(event));
             };
 
           return true;
         }
       }
-      m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), Message::ErrorCode::ObjectNotTable));
+      m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1019_OBJECT_NOT_A_TABLE));
       return true;
     }
     case Message::Command::ReleaseTableModel:
@@ -444,7 +502,7 @@ bool Session::processMessage(const Message& message)
           response->write(info.id);
           response->write(info.value);
         }
-        m_client->sendMessage(std::move(response));
+        m_connection->sendMessage(std::move(response));
         return true;
       }
       break;
@@ -463,7 +521,7 @@ bool Session::processMessage(const Message& message)
           response->write(info.id);
           response->write(info.value);
         }
-        m_client->sendMessage(std::move(response));
+        m_connection->sendMessage(std::move(response));
         return true;
       }
       break;
@@ -496,7 +554,7 @@ bool Session::processMessage(const Message& message)
           if(tile.data().isActive())
             writeObject(*response, it.second);
         }
-        m_client->sendMessage(std::move(response));
+        m_connection->sendMessage(std::move(response));
         return true;
       }
       break;
@@ -515,7 +573,7 @@ bool Session::processMessage(const Message& message)
         response->write(item.menu);
         response->writeBlockEnd();
       }
-      m_client->sendMessage(std::move(response));
+      m_connection->sendMessage(std::move(response));
       return true;
     }
     case Message::Command::OutputMapGetItems:
@@ -525,7 +583,7 @@ bool Session::processMessage(const Message& message)
         auto response = Message::newResponse(message.command(), message.requestId());
         for(auto& item : outputMap->items())
           writeObject(*response, item);
-        m_client->sendMessage(std::move(response));
+        m_connection->sendMessage(std::move(response));
         return true;
       }
       break;
@@ -537,7 +595,7 @@ bool Session::processMessage(const Message& message)
         auto response = Message::newResponse(message.command(), message.requestId());
         for(const auto& item : outputMap->outputs())
           writeObject(*response, item);
-        m_client->sendMessage(std::move(response));
+        m_connection->sendMessage(std::move(response));
         return true;
       }
       break;
@@ -558,12 +616,17 @@ bool Session::processMessage(const Message& message)
     case Message::Command::ImportWorld:
       if(message.isRequest())
       {
-        std::vector<std::byte> worldData;
-        message.read(worldData);
-        if(Traintastic::instance->importWorld(worldData))
-          m_client->sendMessage(Message::newResponse(message.command(), message.requestId()));
-        else
-          m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), Message::ErrorCode::Failed));
+        try
+        {
+          std::vector<std::byte> worldData;
+          message.read(worldData);
+          Traintastic::instance->importWorld(worldData);
+          m_connection->sendMessage(Message::newResponse(message.command(), message.requestId()));
+        }
+        catch(const LogMessageException& e)
+        {
+          m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), e.message(), e.args()));
+        }
       }
       break;
 
@@ -572,16 +635,23 @@ bool Session::processMessage(const Message& message)
       {
         if(Traintastic::instance->world)
         {
-          std::vector<std::byte> worldData;
-          if(Traintastic::instance->world->export_(worldData))
+          try
           {
+            std::vector<std::byte> worldData;
+            Traintastic::instance->world->export_(worldData);
             auto response = Message::newResponse(message.command(), message.requestId());
             response->write(worldData);
-            m_client->sendMessage(std::move(response));
-            return true;
+            m_connection->sendMessage(std::move(response));
+          }
+          catch(const LogMessageException& e)
+          {
+            m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), e.message(), e.args()));
           }
         }
-        m_client->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), Message::ErrorCode::Failed));
+        else
+        {
+          m_connection->sendMessage(Message::newErrorResponse(message.command(), message.requestId(), LogMessage::C1010_EXPORTING_WORLD_FAILED_X, "nullptr"));
+        }
         return true;
       }
       break;
@@ -764,7 +834,7 @@ void Session::memoryLoggerChanged(const MemoryLogger& logger, const uint32_t add
       event->write(log.args->at(j));
   }
 
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::objectDestroying(Object& object)
@@ -775,7 +845,7 @@ void Session::objectDestroying(Object& object)
 
   auto event = Message::newEvent(Message::Command::ObjectDestroyed, sizeof(Handle));
   event->write(handle);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::objectPropertyChanged(BaseProperty& baseProperty)
@@ -799,7 +869,7 @@ void Session::objectPropertyChanged(BaseProperty& baseProperty)
   else
     assert(false);
 
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::writePropertyValue(Message& message , const AbstractProperty& property)
@@ -886,7 +956,7 @@ void Session::objectAttributeChanged(AbstractAttribute& attribute)
   event->write(m_handles.getHandle(attribute.item().object().shared_from_this()));
   event->write(attribute.item().name());
   writeAttribute(*event, attribute);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::objectEventFired(const AbstractEvent& event, const Arguments& arguments)
@@ -931,7 +1001,7 @@ void Session::objectEventFired(const AbstractEvent& event, const Arguments& argu
     }
     i++;
   }
-  m_client->sendMessage(std::move(message));
+  m_connection->sendMessage(std::move(message));
 }
 
 void Session::writeAttribute(Message& message , const AbstractAttribute& attribute)
@@ -1020,7 +1090,7 @@ void Session::inputMonitorInputIdChanged(InputMonitor& inputMonitor, const uint3
   event->write(m_handles.getHandle(inputMonitor.shared_from_this()));
   event->write(address);
   event->write(id);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::inputMonitorInputValueChanged(InputMonitor& inputMonitor, const uint32_t address, const TriState value)
@@ -1029,7 +1099,7 @@ void Session::inputMonitorInputValueChanged(InputMonitor& inputMonitor, const ui
   event->write(m_handles.getHandle(inputMonitor.shared_from_this()));
   event->write(address);
   event->write(value);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::outputKeyboardOutputIdChanged(OutputKeyboard& outputKeyboard, const uint32_t address, std::string_view id)
@@ -1038,7 +1108,7 @@ void Session::outputKeyboardOutputIdChanged(OutputKeyboard& outputKeyboard, cons
   event->write(m_handles.getHandle(outputKeyboard.shared_from_this()));
   event->write(address);
   event->write(id);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::outputKeyboardOutputValueChanged(OutputKeyboard& outputKeyboard, const uint32_t address, const TriState value)
@@ -1047,7 +1117,7 @@ void Session::outputKeyboardOutputValueChanged(OutputKeyboard& outputKeyboard, c
   event->write(m_handles.getHandle(outputKeyboard.shared_from_this()));
   event->write(address);
   event->write(value);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::boardTileDataChanged(Board& board, const TileLocation& location, const TileData& data)
@@ -1063,7 +1133,7 @@ void Session::boardTileDataChanged(Board& board, const TileLocation& location, c
     assert(tile);
     writeObject(*event, tile);
   }
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }
 
 void Session::outputMapOutputsChanged(OutputMap& outputMap)
@@ -1072,5 +1142,5 @@ void Session::outputMapOutputsChanged(OutputMap& outputMap)
   event->write(m_handles.getHandle(outputMap.shared_from_this()));
   for(const auto& item : outputMap.outputs())
     writeObject(*event, item);
-  m_client->sendMessage(std::move(event));
+  m_connection->sendMessage(std::move(event));
 }

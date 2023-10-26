@@ -21,13 +21,16 @@
  */
 
 #include "input.hpp"
-#include "../../world/world.hpp"
+#include "inputcontroller.hpp"
 #include "list/inputlist.hpp"
 #include "list/inputlisttablemodel.hpp"
+#include "../../world/world.hpp"
 #include "../../core/attributes.hpp"
 #include "../../core/objectproperty.tpp"
 #include "../../log/log.hpp"
 #include "../../utils/displayname.hpp"
+
+CREATE_IMPL(Input)
 
 Input::Input(World& world, std::string_view _id)
   : IdObject(world, _id)
@@ -176,7 +179,7 @@ void Input::updateValue(TriState _value)
   // todo: delay in ms for 0->1 || 1->0
   value.setValueInternal(_value);
   if(value != TriState::Undefined)
-    fireEvent(onValueChanged, value == TriState::True);
+    fireEvent<bool, const std::shared_ptr<Input>&>(onValueChanged, value == TriState::True, shared_ptr<Input>());
 }
 
 void Input::interfaceChanged()

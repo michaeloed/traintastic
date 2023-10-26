@@ -30,25 +30,30 @@
 #include "../../../core/vectorproperty.hpp"
 #include "../../../enum/blockstate.hpp"
 #include "../../../hardware/input/map/blockinputmap.hpp"
-#include "../../../train/train.hpp"
 
+class Train;
+class TrainBlockStatus;
 class BlockInputMapItem;
+class BlockPath;
 
 class BlockRailTile : public RailTile
 {
   CLASS_ID("board_tile.rail.block")
   DEFAULT_ID("block")
-  CREATE(BlockRailTile)
+  CREATE_DEF(BlockRailTile)
 
   private:
     Node m_node;
+    std::vector<std::unique_ptr<BlockPath>> m_paths;
 
     void updateHeightWidthMax();
 
   protected:
     void worldEvent(WorldState worldState, WorldEvent worldEvent) final;
     void loaded() final;
+    void destroying() final;
     void setRotate(TileRotate value) final;
+    void boardModified() final;
 
     void updateState();
     void updateTrainMethodEnabled();
@@ -61,9 +66,10 @@ class BlockRailTile : public RailTile
     ObjectProperty<BlockInputMap> inputMap;
     Property<BlockState> state;
     VectorProperty<SensorState> sensorStates;
-    ObjectVectorProperty<Train> trains;
+    ObjectVectorProperty<TrainBlockStatus> trains;
     Method<void(std::shared_ptr<Train>)> assignTrain;
     Method<void()> removeTrain;
+    Method<void()> flipTrain;
     Event<const std::shared_ptr<Train>&, const std::shared_ptr<BlockRailTile>&> onTrainAssigned;
     Event<const std::shared_ptr<Train>&, const std::shared_ptr<BlockRailTile>&> onTrainRemoved;
 
@@ -73,7 +79,13 @@ class BlockRailTile : public RailTile
     std::optional<std::reference_wrapper<Node>> node() final { return m_node; }
     void getConnectors(std::vector<Connector>& connectors) const final;
 
+    const std::vector<std::unique_ptr<BlockPath>>& paths() const
+    {
+      return m_paths;
+    }
+
     void inputItemValueChanged(BlockInputMapItem& item);
+    void identificationEvent(BlockInputMapItem& item, IdentificationEventType eventType, uint16_t identifier, Direction direction, uint8_t category);
 };
 
 #endif

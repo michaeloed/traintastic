@@ -28,17 +28,19 @@
 #include "../../core/objectvectorproperty.hpp"
 #include "../../core/event.hpp"
 #include "../../enum/tristate.hpp"
-#include "inputcontroller.hpp"
+#include "../../enum/simulateinputaction.hpp"
 
 #ifdef interface
   #undef interface // interface is defined in combaseapi.h
 #endif
 
+class InputController;
+
 class Input : public IdObject
 {
   CLASS_ID("input")
   DEFAULT_ID("input")
-  CREATE(Input)
+  CREATE_DEF(Input)
 
   friend class InputController;
 
@@ -66,7 +68,7 @@ class Input : public IdObject
     Property<uint32_t> address;
     Property<TriState> value;
     ObjectVectorProperty<Object> consumers;
-    Event<bool> onValueChanged;
+    Event<bool, const std::shared_ptr<Input>&> onValueChanged;
 
     Input(World& world, std::string_view _id);
 

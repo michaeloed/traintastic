@@ -25,7 +25,7 @@
 
 #include "kernel.hpp"
 #include <boost/asio/steady_timer.hpp>
-#include "../../../enum/tristate.hpp"
+#include <traintastic/enum/tristate.hpp>
 
 enum class SimulateInputAction;
 class InputController;
@@ -62,6 +62,16 @@ class ClientKernel final : public Kernel
   private:
     const bool m_simulation;
     boost::asio::steady_timer m_keepAliveTimer;
+    BroadcastFlags m_broadcastFlags;
+    int m_broadcastFlagsRetryCount;
+    static constexpr int maxBroadcastFlagsRetryCount = 10;
+
+    static constexpr BroadcastFlags requiredBroadcastFlags =
+      BroadcastFlags::PowerLocoTurnoutChanges |
+      BroadcastFlags::RBusChanges |
+      BroadcastFlags::SystemStatusChanges |
+      BroadcastFlags::AllLocoChanges | // seems not to work with DR5000
+      BroadcastFlags::LocoNetDetector;
 
     uint32_t m_serialNumber;
     std::function<void(uint32_t)> m_onSerialNumberChanged;
@@ -86,7 +96,7 @@ class ClientKernel final : public Kernel
 
     ClientConfig m_config;
 
-    ClientKernel(const ClientConfig& config, bool simulation);
+    ClientKernel(std::string logId_, const ClientConfig& config, bool simulation);
 
     void onStart() final;
     void onStop() final;
@@ -114,10 +124,10 @@ class ClientKernel final : public Kernel
      * @return The kernel instance
      */
     template<class IOHandlerType, class... Args>
-    static std::unique_ptr<ClientKernel> create(const ClientConfig& config, Args... args)
+    static std::unique_ptr<ClientKernel> create(std::string logId_, const ClientConfig& config, Args... args)
     {
       static_assert(std::is_base_of_v<IOHandler, IOHandlerType>);
-      std::unique_ptr<ClientKernel> kernel{new ClientKernel(config, isSimulation<IOHandlerType>())};
+      std::unique_ptr<ClientKernel> kernel{new ClientKernel(std::move(logId_), config, isSimulation<IOHandlerType>())};
       kernel->setIOHandler(std::make_unique<IOHandlerType>(*kernel, std::forward<Args>(args)...));
       return kernel;
     }

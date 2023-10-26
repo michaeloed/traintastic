@@ -26,11 +26,13 @@
 #include <boost/uuid/string_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <archive.h>
+#include <zlib.h>
 #include <version.hpp>
 #include <traintastic/utils/str.hpp>
 #include "../core/eventloop.hpp"
 #include "../network/server.hpp"
 #include "../core/attributes.hpp"
+#include "../core/method.tpp"
 #include "../core/objectproperty.tpp"
 #include "../world/world.hpp"
 #include "../world/worldlist.hpp"
@@ -99,6 +101,7 @@ Traintastic::Traintastic(const std::filesystem::path& dataDir) :
       assert(weakWorld.expired());
 #endif
       settings->lastWorld = "";
+      Log::log(*this, LogMessage::N1028_CLOSED_WORLD);
     }},
   restart{*this, "restart",
     [this]()
@@ -141,7 +144,7 @@ Traintastic::Traintastic(const std::filesystem::path& dataDir) :
   m_interfaceItems.add(shutdown);
 }
 
-bool Traintastic::importWorld(const std::vector<std::byte>& worldData)
+void Traintastic::importWorld(const std::vector<std::byte>& worldData)
 {
   try
   {
@@ -153,17 +156,15 @@ bool Traintastic::importWorld(const std::vector<std::byte>& worldData)
     assert(weakWorld.expired());
 #endif
     Log::log(*this, LogMessage::N1026_IMPORTED_WORLD_SUCCESSFULLY);
-    return true;
   }
   catch(const LogMessageException& e)
   {
-    Log::log(*this, e.message(), e.args());
+    throw e;
   }
   catch(const std::exception& e)
   {
-    Log::log(*this, LogMessage::C1011_IMPORTING_WORLD_FAILED_X, e.what());
+    throw LogMessageException(LogMessage::C1011_IMPORTING_WORLD_FAILED_X, e.what());
   }
-  return false;
 }
 
 Traintastic::RunStatus Traintastic::run(const std::string& worldUUID, bool simulate, bool online, bool power, bool run)
@@ -173,6 +174,7 @@ Traintastic::RunStatus Traintastic::run(const std::string& worldUUID, bool simul
   Log::log(*this, LogMessage::I1006_X, boostVersion);
   Log::log(*this, LogMessage::I1007_X, std::string_view{"nlohmann::json " STR(NLOHMANN_JSON_VERSION_MAJOR) "." STR(NLOHMANN_JSON_VERSION_MINOR) "." STR(NLOHMANN_JSON_VERSION_PATCH)});
   Log::log(*this, LogMessage::I1008_X, std::string_view{archive_version_details()});
+  Log::log(*this, LogMessage::I1009_ZLIB_X, std::string_view{zlibVersion()});
   //! \todo Add tcb::span version when available, see https://github.com/tcbrindle/span/issues/33
   Log::log(*this, LogMessage::I9002_X, Lua::getVersion());
 
@@ -215,7 +217,15 @@ Traintastic::RunStatus Traintastic::run(const std::string& worldUUID, bool simul
       world->powerOn();
   }
 
-  EventLoop::exec();
+  try
+  {
+    EventLoop::exec();
+  }
+  catch(const std::exception& e)
+  {
+    Log::log(id, LogMessage::F1008_EVENTLOOP_CRASHED_X, e.what());
+    return ExitFailure;
+  }
 
   return m_restart ? Restart : ExitSuccess;
 }
@@ -253,6 +263,7 @@ void Traintastic::loadWorldPath(const std::filesystem::path& path)
     assert(weakWorld.expired());
 #endif
     settings->lastWorld = world->uuid.value();
+    Log::log(*this, LogMessage::N1027_LOADED_WORLD_X, world->name.value());
   }
   catch(const LogMessageException& e)
   {

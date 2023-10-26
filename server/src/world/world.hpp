@@ -26,18 +26,17 @@
 #include "../core/object.hpp"
 #include "../core/property.hpp"
 #include "../core/objectproperty.hpp"
-#include "../core/controllerlist.hpp"
+#include "../core/objectvectorproperty.hpp"
 #include "../core/method.hpp"
 #include "../core/event.hpp"
-#include <traintastic/utils/stdfilesystem.hpp>
 #include <unordered_map>
 #include <boost/uuid/uuid.hpp>
 #include <traintastic/enum/worldevent.hpp>
 #include "../enum/worldscale.hpp"
+#include "../status/status.hpp"
 #include <traintastic/set/worldstate.hpp>
 
 class WorldLoader;
-class LinkRailTile;
 class LNCVProgrammer;
 class DecoderController;
 class InputController;
@@ -50,17 +49,23 @@ class InputList;
 class OutputList;
 class IdentificationList;
 class BoardList;
+class LinkRailTileList;
+class NXManager;
 class Clock;
 class TrainList;
 class RailVehicleList;
+
+template <typename T>
+class ControllerList;
+
 namespace Lua {
   class ScriptList;
 }
-class LinkRailTileList;
 
 class World : public Object
 {
   friend class IdObject;
+  friend class StateObject;
   friend class Traintastic;
   friend class WorldLoader;
   friend class WorldSaver;
@@ -113,7 +118,9 @@ class World : public Object
     ObjectProperty<Lua::ScriptList> luaScripts;
 
     ObjectProperty<LinkRailTileList> linkRailTiles;
+    ObjectProperty<NXManager> nxManager;
 
+    ObjectVectorProperty<Status> statuses;
     Property<uint32_t> hardwareThrottles; //<! number of connected hardware throttles
 
     Property<WorldState> state;
@@ -146,7 +153,7 @@ class World : public Object
     ObjectPtr getObjectById(const std::string& _id) const;
     ObjectPtr getObjectByPath(std::string_view path) const;
 
-    bool export_(std::vector<std::byte>& data);
+    void export_(std::vector<std::byte>& data);
 };
 
 #endif

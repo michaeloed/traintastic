@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2020-2022 Reinder Feenstra
+ * Copyright (C) 2020-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -25,12 +25,15 @@
 #include "boardlisttablemodel.hpp"
 #include "map/link.hpp"
 #include "tile/tiles.hpp"
+#include "../core/method.tpp"
 #include "../core/objectproperty.tpp"
 #include "../world/world.hpp"
 #include "../world/worldloader.hpp"
 #include "../core/attributes.hpp"
 #include "../utils/displayname.hpp"
 #include <cassert>
+
+CREATE_IMPL(Board)
 
 Board::Board(World& world, std::string_view _id) :
   IdObject(world, _id),
@@ -355,11 +358,6 @@ void Board::worldEvent(WorldState state, WorldEvent event)
   Attributes::setEnabled(resizeTile, editable && stopped);
   Attributes::setEnabled(deleteTile, editable && stopped);
   Attributes::setEnabled(resizeToContents, editable);
-
-  if(event == WorldEvent::EditDisabled || event == WorldEvent::Run)
-  {
-    modified();
-  }
 }
 
 void Board::loaded()

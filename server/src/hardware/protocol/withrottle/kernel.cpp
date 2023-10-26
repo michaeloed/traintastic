@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022 Reinder Feenstra
+ * Copyright (C) 2022-2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -27,8 +27,10 @@
 #include "../../throttle/hardwarethrottle.hpp"
 #include "../../throttle/throttlecontroller.hpp"
 #include "../../../core/eventloop.hpp"
+#include "../../../core/method.tpp"
 #include "../../../clock/clock.hpp"
 #include "../../../log/log.hpp"
+#include "../../../log/logmessageexception.hpp"
 #include "../../../utils/fromchars.hpp"
 #include "../../../utils/setthreadname.hpp"
 #include "../../../utils/startswith.hpp"
@@ -86,8 +88,9 @@ static std::string buildName(std::string name, char multiThrottleId)
   return name;
 }
 
-Kernel::Kernel(const Config& config)
-  : m_config{config}
+Kernel::Kernel(std::string logId_, const Config& config)
+  : KernelBase(std::move(logId_))
+  , m_config{config}
 {
   assert(isEventLoopThread());
 }
@@ -137,14 +140,22 @@ void Kernel::start()
   m_ioContext.post(
     [this]()
     {
-      m_ioHandler->start();
-
-      if(m_onStarted)
+      try
+      {
+        m_ioHandler->start();
+      }
+      catch(const LogMessageException& e)
+      {
         EventLoop::call(
-          [this]()
+          [this, e]()
           {
-            m_onStarted();
+            Log::log(logId, e.message(), e.args());
+            error();
           });
+        return;
+      }
+
+      started();
     });
 }
 
@@ -257,7 +268,7 @@ void Kernel::receiveFrom(std::string_view message, IOHandler::ClientId clientId)
     EventLoop::call(
       [this, clientId, msg=std::string(message)]()
       {
-        Log::log(m_logId, LogMessage::D2005_X_RX_X, clientId, msg);
+        Log::log(logId, LogMessage::D2005_X_RX_X, clientId, msg);
       });
 
   if(message[0] == 'M') // Multi throttle command
@@ -305,7 +316,7 @@ void Kernel::receiveFrom(std::string_view message, IOHandler::ClientId clientId)
               if(!throttle)
                 return;
 
-              switch(throttle->acquire(DecoderProtocol::DCC, address.address, address.isLong, steal))
+              switch(throttle->acquire(address.isLong ? DecoderProtocol::DCCLong : DecoderProtocol::DCCShort, address.address, steal))
               {
                 case Throttle::AcquireResult::Success:
                 {
@@ -429,7 +440,7 @@ void Kernel::sendTo(std::string_view message, IOHandler::ClientId clientId)
       EventLoop::call(
         [this, clientId, msg=std::string(message)]()
         {
-          Log::log(m_logId, LogMessage::D2004_X_TX_X, clientId, msg);
+          Log::log(logId, LogMessage::D2004_X_TX_X, clientId, msg);
         });
   }
 }
@@ -444,7 +455,7 @@ void Kernel::sendToAll(std::string_view message)
       EventLoop::call(
         [this, msg=std::string(message)]()
         {
-          Log::log(m_logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId, LogMessage::D2001_TX_X, msg);
         });
   }
 }

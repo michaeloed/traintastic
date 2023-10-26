@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021 Reinder Feenstra
+ * Copyright (C) 2021,2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,6 +24,10 @@
 #define TRAINTASTIC_CLIENT_NETWORK_OBJECTVECTORPROPERTY_HPP
 
 #include "abstractvectorproperty.hpp"
+#include <optional>
+#include "objectptr.hpp"
+
+struct Error;
 
 class ObjectVectorProperty : public AbstractVectorProperty
 {
@@ -47,6 +51,13 @@ class ObjectVectorProperty : public AbstractVectorProperty
     int size() const final
     {
       return m_ids.size();
+    }
+
+    [[nodiscard]] int getObject(int index, std::function<void(const ObjectPtr&, std::optional<const Error>)> callback);
+    [[nodiscard]] int getObjects(int startIndex, int endIndex, std::function<void(const std::vector<ObjectPtr>&, std::optional<const Error>)> callback);
+    [[nodiscard]] int getObjects(std::function<void(const std::vector<ObjectPtr>&, std::optional<const Error>)> callback)
+    {
+      return getObjects(0, size() - 1, std::move(callback));
     }
 
     const QString& getObjectId(int index) const
