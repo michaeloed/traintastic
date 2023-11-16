@@ -1,9 +1,9 @@
 /**
- * server/src/board/tile/rail/crossrailtile.hpp
+ * shared/src/traintastic/enum/autoyesno.hpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2022-2023 Reinder Feenstra
+ * Copyright (C) 2023 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,28 +20,32 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_BOARD_TILE_RAIL_CROSSRAILTILE_HPP
-#define TRAINTASTIC_SERVER_BOARD_TILE_RAIL_CROSSRAILTILE_HPP
+#ifndef TRAINTASTIC_SHARED_TRAINTASTIC_ENUM_AUTOYESNO_HPP
+#define TRAINTASTIC_SHARED_TRAINTASTIC_ENUM_AUTOYESNO_HPP
 
-#include "railtile.hpp"
-#include "../../map/node.hpp"
+#include <cstdint>
+#include <array>
+#include "enum.hpp"
 
-enum class CrossState : uint8_t;
-
-class CrossRailTile : public RailTile
+enum class AutoYesNo : uint8_t
 {
-  private:
-    Node m_node;
-    CrossState m_crossState; //!< indicates which path is reserved
+  Auto = 0,
+  Yes = 1,
+  No = 2,
+};
 
-  protected:
-    CrossRailTile(World& world, std::string_view _id, TileId tileId_);
+TRAINTASTIC_ENUM(AutoYesNo, "auto_yes_no", 3,
+{
+  {AutoYesNo::Auto, "auto"},
+  {AutoYesNo::Yes, "yes"},
+  {AutoYesNo::No, "no"},
+});
 
-  public:
-    std::optional<std::reference_wrapper<const Node>> node() const final { return m_node; }
-    std::optional<std::reference_wrapper<Node>> node() final { return m_node; }
-
-    bool reserve(CrossState crossState, bool dryRun = false);
+constexpr std::array<AutoYesNo, 3> autoYesNoValues
+{
+  AutoYesNo::Auto,
+  AutoYesNo::Yes,
+  AutoYesNo::No,
 };
 
 #endif

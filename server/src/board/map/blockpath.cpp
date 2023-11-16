@@ -26,6 +26,7 @@
 #include "node.hpp"
 #include "link.hpp"
 #include "../tile/rail/blockrailtile.hpp"
+#include "../tile/rail/bridgerailtile.hpp"
 #include "../tile/rail/crossrailtile.hpp"
 #include "../tile/rail/directioncontrolrailtile.hpp"
 #include "../tile/rail/signal/signalrailtile.hpp"
@@ -33,8 +34,20 @@
 #include "../tile/rail/linkrailtile.hpp"
 #include "../tile/rail/nxbuttonrailtile.hpp"
 #include "../../core/objectproperty.tpp"
+#include "../../enum/bridgepath.hpp"
 
-std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBlock)
+template<class T1, typename T2>
+static bool contains(const std::vector<std::pair<std::weak_ptr<T1>, T2>>& values, const std::shared_ptr<T1>& value)
+{
+  const auto it = std::find_if(values.begin(), values.end(),
+    [&value](const auto& item)
+    {
+      return item.first.lock() == value;
+    });
+  return it != values.end();
+}
+
+std::vector<std::shared_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBlock)
 {
   const auto& node = startBlock.node()->get();
   const auto& linkA = node.getLink(0);
@@ -47,21 +60,21 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
 
   struct Position
   {
-    std::unique_ptr<BlockPath> path;
+    std::shared_ptr<BlockPath> path;
     const Node* node;
     const Link* link;
   };
 
-  std::vector<std::unique_ptr<BlockPath>> paths;
+  std::vector<std::shared_ptr<BlockPath>> paths;
 
   std::queue<Position> todo;
   if(linkA)
   {
-    todo.emplace(Position{std::make_unique<BlockPath>(startBlock, Side::A), &node, linkA.get()});
+    todo.emplace(Position{std::make_shared<BlockPath>(startBlock, BlockSide::A), &node, linkA.get()});
   }
   if(linkB)
   {
-    todo.emplace(Position{std::make_unique<BlockPath>(startBlock, Side::B), &node, linkB.get()});
+    todo.emplace(Position{std::make_shared<BlockPath>(startBlock, BlockSide::B), &node, linkB.get()});
   }
 
   while(!todo.empty())
@@ -72,6 +85,12 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
       todo.pop(); // drop it, dead end
       continue;
     }
+
+    for(const auto& tile : current.link->tiles()) // add passive tiles to reserve
+    {
+      current.path->m_tiles.emplace_back(std::static_pointer_cast<RailTile>(tile));
+    }
+
     assert(current.node);
     const auto& nextNode = current.link->getNext(*current.node);
     auto& tile = nextNode.tile();
@@ -80,10 +99,6 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
     {
       case TileId::RailBlock:
       {
-        // temp dummy use to fix warnings:
-        (void)current.path->m_fromBlock;
-        (void)current.path->m_fromSide;
-
         if(current.node->tile().tileId() == TileId::RailNXButton)
         {
           current.path->m_nxButtonTo = current.node->tile().shared_ptr<NXButtonRailTile>();
@@ -91,7 +106,7 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
 
         auto& block = static_cast<BlockRailTile&>(tile);
         current.path->m_toBlock = block.shared_ptr<BlockRailTile>();
-        current.path->m_toSide = nextNode.getLink(0).get() == current.link ? Side::A : Side::B;
+        current.path->m_toSide = nextNode.getLink(0).get() == current.link ? BlockSide::A : BlockSide::B;
         paths.emplace_back(std::move(current.path));
         todo.pop(); // complete
         break;
@@ -107,7 +122,12 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
       case TileId::RailTurnoutSingleSlip:
       case TileId::RailTurnoutDoubleSlip:
       {
-        auto* turnout = static_cast<TurnoutRailTile*>(&tile);
+        auto turnout = tile.shared_ptr<TurnoutRailTile>();
+        if(contains(current.path->m_turnouts, turnout))
+        {
+          todo.pop(); // drop it, can't pass turnout twice
+          break;
+        }
         auto links = getTurnoutLinks(*turnout, *current.link);
         assert(!links.empty());
 
@@ -115,15 +135,15 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
         {
           for(size_t i = 1; i < links.size(); ++i)
           {
-            auto path = std::make_unique<BlockPath>(*current.path); // "fork" path
-            path->m_turnouts.emplace_back(turnout->shared_ptr<TurnoutRailTile>(), links[i].turnoutPosition);
+            auto path = std::make_shared<BlockPath>(*current.path); // "fork" path
+            path->m_turnouts.emplace_back(turnout, links[i].turnoutPosition);
             todo.emplace(Position{std::move(path), &nextNode, nextNode.getLink(links[i].linkIndex).get()});
           }
         }
 
         current.node = &nextNode;
         current.link = nextNode.getLink(links[0].linkIndex).get();
-        current.path->m_turnouts.emplace_back(turnout->shared_ptr<TurnoutRailTile>(), links[0].turnoutPosition);
+        current.path->m_turnouts.emplace_back(turnout, links[0].turnoutPosition);
         break;
       }
       case TileId::RailOneWay:
@@ -134,6 +154,7 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
         //  0
         if(nextNode.getLink(0).get() == current.link) // 0 -> 1 = allowed
         {
+          current.path->m_tiles.emplace_back(tile.shared_ptr<RailTile>());
           current.node = &nextNode;
           current.link = nextNode.getLink(1).get();
         }
@@ -170,6 +191,7 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
           {
             current.node = &nextNode;
             current.link = nextNode.getLink((i + 2) % 4).get(); // opposite
+            current.path->m_bridges.emplace_back(tile.shared_ptr<BridgeRailTile>(), i % 2 == 0 ? BridgePath::AC : BridgePath::BD);
             break;
           }
         }
@@ -177,28 +199,38 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
 
       case TileId::RailCross45:
       case TileId::RailCross90:
+      {
         //     2        2 3
         //     |        |/
         // 1 --+-- 3    |
         //     |       /|
         //     0      1 0
+        auto cross = tile.shared_ptr<CrossRailTile>();
+        if(contains(current.path->m_crossings, cross))
+        {
+          todo.pop(); // drop it, can't pass crossing twice
+          break;
+        }
+
         for(size_t i = 0; i < 4; i++)
         {
           if(nextNode.getLink(i).get() == current.link)
           {
             current.node = &nextNode;
             current.link = nextNode.getLink((i + 2) % 4).get(); // opposite
-            current.path->m_crossings.emplace_back(tile.shared_ptr<CrossRailTile>(), i % 2 == 0 ? CrossState::AC : CrossState::BD);
+            current.path->m_crossings.emplace_back(cross, i % 2 == 0 ? CrossState::AC : CrossState::BD);
             break;
           }
         }
         break;
-
+      }
       case TileId::RailLink:
       {
         auto& linkTile = static_cast<LinkRailTile&>(tile);
         if(linkTile.link) // is connected to another link
         {
+          current.path->m_tiles.emplace_back(linkTile.shared_ptr<RailTile>());
+          current.path->m_tiles.emplace_back(linkTile.link->shared_ptr<RailTile>());
           assert(linkTile.link->node());
           auto& linkNode = linkTile.link->node()->get();
           current.node = &linkNode;
@@ -221,10 +253,12 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
         else // 1 -> 0 = backside of signal, just pass
         {
           current.link = nextNode.getLink(0).get();
+          current.path->m_tiles.emplace_back(tile.shared_ptr<RailTile>());
         }
         break;
 
       case TileId::RailDecoupler:
+        current.path->m_tiles.emplace_back(tile.shared_ptr<RailTile>());
         current.node = &nextNode;
         current.link = otherLink(nextNode, *current.link).get();
         break;
@@ -232,7 +266,11 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
       case TileId::RailNXButton:
         if(&current.node->tile() == &startBlock)
         {
-          current.path->m_nxButtonFrom = nextNode.tile().shared_ptr<NXButtonRailTile>();
+          current.path->m_nxButtonFrom = tile.shared_ptr<NXButtonRailTile>();
+        }
+        else
+        {
+          current.path->m_tiles.emplace_back(tile.shared_ptr<RailTile>());
         }
         current.node = &nextNode;
         current.link = otherLink(nextNode, *current.link).get();
@@ -248,10 +286,10 @@ std::vector<std::unique_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
 }
 
 
-BlockPath::BlockPath(BlockRailTile& block, Side side)
+BlockPath::BlockPath(BlockRailTile& block, BlockSide side)
   : m_fromBlock{block}
   , m_fromSide{side}
-  , m_toSide{static_cast<Side>(-1)}
+  , m_toSide{static_cast<BlockSide>(-1)}
 {
 }
 
@@ -263,4 +301,139 @@ std::shared_ptr<NXButtonRailTile> BlockPath::nxButtonFrom() const
 std::shared_ptr<NXButtonRailTile> BlockPath::nxButtonTo() const
 {
   return m_nxButtonTo.lock();
+}
+
+bool BlockPath::reserve(const std::shared_ptr<Train>& train, bool dryRun)
+{
+  if(!dryRun && !reserve(train, true)) // dry run first, to make sure it will succeed (else we need rollback support)
+  {
+    return false;
+  }
+
+  if(!m_fromBlock.reserve(train, m_fromSide, dryRun))
+  {
+    assert(dryRun);
+    return false;
+  }
+
+  if(auto toBlock = m_toBlock.lock()) /*[[likely]]*/
+  {
+    if(!toBlock->reserve(train, m_toSide, dryRun))
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+  else
+  {
+    return false;
+  }
+
+  for(const auto& [turnoutWeak, position] : m_turnouts)
+  {
+    if(auto turnout = turnoutWeak.lock())
+    {
+      if(!turnout->reserve(position, dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  for(const auto& [directionControlWeak, state] : m_directionControls)
+  {
+    if(auto directionControl = directionControlWeak.lock())
+    {
+      if(!directionControl->reserve(state, dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  for(const auto& [crossWeak, state] : m_crossings)
+  {
+    if(auto cross = crossWeak.lock())
+    {
+      if(!cross->reserve(state, dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  for(const auto& [bridgeWeak, path] : m_bridges)
+  {
+    if(auto bridge = bridgeWeak.lock())
+    {
+      if(!bridge->reserve(path, dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  for(const auto& signalWeak : m_signals)
+  {
+    if(auto signal = signalWeak.lock())
+    {
+      if(!signal->reserve(shared_from_this(), dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  if(!dryRun)
+  {
+    for(const auto& tileWeak : m_tiles)
+    {
+      if(auto tile = tileWeak.lock()) /*[[likely]]*/
+      {
+        static_cast<RailTile&>(*tile).reserve();
+      }
+    }
+
+    if(auto nxButton = m_nxButtonFrom.lock())
+    {
+      nxButton->reserve();
+    }
+
+    if(auto nxButton = m_nxButtonTo.lock())
+    {
+      nxButton->reserve();
+    }
+  }
+
+  return true;
 }

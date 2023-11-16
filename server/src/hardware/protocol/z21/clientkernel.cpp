@@ -22,9 +22,9 @@
 
 #include "clientkernel.hpp"
 #include "messages.hpp"
-#include "../xpressnet/messages.hpp"
 #include "../../decoder/decoder.hpp"
 #include "../../decoder/decoderchangeflags.hpp"
+#include "../../protocol/dcc/dcc.hpp"
 #include "../../input/inputcontroller.hpp"
 #include "../../../core/eventloop.hpp"
 #include "../../../log/log.hpp"
@@ -36,6 +36,7 @@ ClientKernel::ClientKernel(std::string logId_, const ClientConfig& config, bool 
   : Kernel(std::move(logId_))
   , m_simulation{simulation}
   , m_keepAliveTimer(m_ioContext)
+  , m_inactiveDecoderPurgeTimer(m_ioContext)
   , m_config{config}
 {
 }
@@ -53,9 +54,9 @@ void ClientKernel::receive(const Message& message)
 {
   if(m_config.debugLogRXTX)
     EventLoop::call(
-      [this, msg=toString(message)]()
+      [logId_=logId, msg=toString(message)]()
       {
-        Log::log(logId, LogMessage::D2002_RX_X, msg);
+        Log::log(logId_, LogMessage::D2002_RX_X, msg);
       });
 
   switch(message.header())
@@ -64,7 +65,7 @@ void ClientKernel::receive(const Message& message)
     {
       const auto& lanX = static_cast<const LanX&>(message);
 
-      if(!XpressNet::isChecksumValid(*reinterpret_cast<const XpressNet::Message*>(&lanX.xheader)))
+      if(!LanX::isChecksumValid(lanX))
         break;
 
       switch(lanX.xheader)
@@ -72,50 +73,210 @@ void ClientKernel::receive(const Message& message)
         case LAN_X_BC:
           if(message == LanXBCTrackPowerOff() || message == LanXBCTrackShortCircuit())
           {
-            if(m_trackPowerOn != TriState::False)
-            {
-              m_trackPowerOn = TriState::False;
-
-              if(m_onTrackPowerOnChanged)
-                EventLoop::call(
-                  [this]()
-                  {
+            EventLoop::call(
+              [this]()
+              {
+                if(m_trackPowerOn != TriState::False)
+                {
+                  m_trackPowerOn = TriState::False;
+                  if(m_onTrackPowerOnChanged)
                     m_onTrackPowerOnChanged(false);
-                  });
-            }
+                }
+              });
           }
           else if(message == LanXBCTrackPowerOn())
           {
-            if(m_trackPowerOn != TriState::True)
-            {
-              m_trackPowerOn = TriState::True;
-
-              if(m_onTrackPowerOnChanged)
-                EventLoop::call(
-                  [this]()
-                  {
+            EventLoop::call(
+              [this]()
+              {
+                if(m_trackPowerOn != TriState::True)
+                {
+                  m_trackPowerOn = TriState::True;
+                  if(m_onTrackPowerOnChanged)
                     m_onTrackPowerOnChanged(true);
-                  });
-            }
+                }
+              });
           }
           break;
 
         case LAN_X_BC_STOPPED:
           if(message == LanXBCStopped())
           {
-            if(m_emergencyStop != TriState::True)
-            {
-              m_emergencyStop = TriState::True;
-
-              if(m_onEmergencyStop)
-                EventLoop::call(
-                  [this]()
-                  {
+            EventLoop::call(
+              [this]()
+              {
+                if(m_emergencyStop != TriState::True)
+                {
+                  m_emergencyStop = TriState::True;
+                  if(m_onEmergencyStop)
                     m_onEmergencyStop();
-                  });
-            }
+                }
+              });
           }
           break;
+
+        case LAN_X_LOCO_INFO:
+        {
+          if(message.dataLen() >= LanXLocoInfo::minMessageSize && message.dataLen() <= LanXLocoInfo::maxMessageSize)
+          {
+            const auto& reply = static_cast<const LanXLocoInfo&>(message);
+
+            //NOTE: there is also a function at index 0, hence +1
+            const int functionIndexMax = std::min(reply.functionIndexMax(), LanXLocoInfo::supportedFunctionIndexMax);
+            bool val[LanXLocoInfo::supportedFunctionIndexMax + 1] = {};
+
+            for(int i = 0; i <= functionIndexMax; i++)
+            {
+              val[i] = reply.getFunction(i);
+            }
+
+            LocoCache &cache = getLocoCache(reply.address());
+
+            DecoderChangeFlags changes = DecoderChangeFlags(0);
+
+            //Rescale everything to 126 steps
+            int currentSpeedStep = reply.speedStep();
+            if(reply.speedSteps() != 126)
+            {
+              currentSpeedStep = float(currentSpeedStep) / float(reply.speedSteps()) * 126.0;
+              if(abs(currentSpeedStep - cache.lastReceivedSpeedStep) < 5)
+                currentSpeedStep = cache.lastReceivedSpeedStep; //Consider it a rounding error
+            }
+
+            int targetSpeedStep = cache.speedStep;
+            if(cache.speedSteps != 126)
+            {
+              targetSpeedStep = float(targetSpeedStep) / float(cache.speedSteps) * 126.0;
+            }
+
+            if(!cache.speedTrendExplicitlySet)
+            {
+              //Calculate new speed trend
+              if(cache.lastReceivedSpeedStep <= currentSpeedStep)
+                cache.speedTrend = LocoCache::Trend::Ascending;
+              else
+                cache.speedTrend = LocoCache::Trend::Descending;
+            }
+            cache.speedTrendExplicitlySet = false;
+
+            if(reply.speedSteps() != cache.speedSteps || reply.speedStep() != cache.speedStep)
+            {
+              // Use a timeout of 1 second to prevent reacting to Z21 feedback messages
+              // of our own changes. This would be problematic because in the meatime our
+              // changes were sent to Z21 processed and received back here, decoder state
+              // might have changed (and sent again to Z21) so we should discard "old" state.
+              // This has the potential of ignoring genuine user changes for this decoder
+              // (made by a physical throttle or other hardware connected to Z21) but
+              // being the timeout short it should rarely happen.
+              // Theoretically the timeout should only be of Train::updateSpeed() timer timeout
+              // (100ms) because values will be refreshed and timeout restarted by Train itself
+              // but we need to accout also for network trasmission and Z21 processing time.
+
+              if((std::chrono::steady_clock::now() - cache.lastSetTime) > std::chrono::milliseconds(1000))
+              {
+                if(reply.speedSteps() != cache.speedSteps)
+                {
+                  changes |= DecoderChangeFlags::SpeedSteps;
+                }
+                if(reply.speedStep() != cache.speedStep)
+                {
+                  changes |= DecoderChangeFlags::Throttle;
+                }
+
+                cache.speedSteps = reply.speedSteps();
+                cache.speedStep = reply.speedStep();
+              }
+              else
+              {
+                bool maybeOldFeedback = false;
+
+                if((cache.speedTrend == LocoCache::Trend::Ascending && currentSpeedStep <= targetSpeedStep)
+                    || (cache.speedTrend == LocoCache::Trend::Descending && currentSpeedStep >= targetSpeedStep))
+                {
+                  //When accelerating or decelerating ignore all speeds between original speed and target speed.
+                  //These messages are probably feedback of our own changes arrived with some delay.
+                  //If we get values outside this range or changing trend we pass them to let Train adjust.
+                  maybeOldFeedback = true;
+                }
+
+                if(!maybeOldFeedback)
+                {
+                  changes |= DecoderChangeFlags::Throttle | DecoderChangeFlags::SpeedSteps;
+                  cache.speedSteps = reply.speedSteps();
+                  cache.speedStep = reply.speedStep();
+                }
+              }
+            }
+
+            //Emergency stop is urgent so bypass timeout
+            //Direction is not propagated back so it shouldn't start looping
+            //We bypass timeout also for Direction change.
+            //It can at worst cause a short flickering changing direction n times and then settle down
+            if(reply.direction() != cache.direction)
+            {
+              changes |= DecoderChangeFlags::Direction;
+              cache.direction = reply.direction();
+            }
+            if(reply.isEmergencyStop() || reply.isEmergencyStop() != cache.isEStop)
+            {
+              //Force change when emergency stop is set to be sure it gets received
+              //as soon as possible
+              changes |= DecoderChangeFlags::EmergencyStop;
+              cache.isEStop = reply.isEmergencyStop();
+            }
+
+            //Do not update last seen time to avoid ignoring genuine user commands
+            //Store last received speed step converted to 126 steps scale
+            cache.lastReceivedSpeedStep = currentSpeedStep;
+
+            EventLoop::call(
+              [this, address=reply.address(), isEStop=reply.isEmergencyStop(),
+              speed = reply.speedStep(), speedMax=reply.speedSteps(),
+              dir = reply.direction(), val, functionIndexMax, changes]()
+              {
+                try
+                {
+                  if(auto decoder = m_decoderController->getDecoder(DCC::getProtocol(address), address))
+                  {
+                    float throttle = Decoder::speedStepToThrottle(speed, speedMax);
+
+                    if(has(changes, DecoderChangeFlags::EmergencyStop))
+                    {
+                      m_isUpdatingDecoderFromKernel = true;
+                      decoder->emergencyStop = isEStop;
+                    }
+
+                    if(has(changes, DecoderChangeFlags::Direction))
+                    {
+                      m_isUpdatingDecoderFromKernel = true;
+                      decoder->direction = dir;
+                    }
+
+                    if(has(changes, DecoderChangeFlags::Throttle | DecoderChangeFlags::SpeedSteps))
+                    {
+                      m_isUpdatingDecoderFromKernel = true;
+                      decoder->throttle = throttle;
+                    }
+
+                    //Reset flag guard at end
+                    m_isUpdatingDecoderFromKernel = false;
+
+                    //Function get always updated because we do not store a copy in cache
+                    //so there is no way to tell in advance if they changed
+                    for(int i = 0; i <= functionIndexMax; i++)
+                    {
+                      decoder->setFunctionValue(i, val[i]);
+                    }
+                  }
+                }
+                catch(...)
+                {
+
+                }
+              });
+          }
+          break;
+        }
       }
       break;
     }
@@ -246,29 +407,23 @@ void ClientKernel::receive(const Message& message)
                                     && (reply.centralState & Z21_CENTRALSTATE_SHORTCIRCUIT) == 0;
 
         const TriState trackPowerOn = toTriState(isTrackPowerOn);
-        if(m_trackPowerOn != trackPowerOn)
-        {
-          m_trackPowerOn = trackPowerOn;
+        const TriState stopState = toTriState(isStop);
 
-          if(m_onTrackPowerOnChanged)
-            EventLoop::call(
-              [this, isTrackPowerOn]()
-              {
-                m_onTrackPowerOnChanged(isTrackPowerOn);
-              });
-        }
+        EventLoop::call([this, trackPowerOn, stopState]()
+          {
+            if(m_trackPowerOn != trackPowerOn)
+            {
+              m_trackPowerOn = trackPowerOn;
+              if(m_onTrackPowerOnChanged)
+                m_onTrackPowerOnChanged(trackPowerOn == TriState::True);
+            }
 
-        if(m_emergencyStop != TriState::True && isStop)
-        {
-          m_emergencyStop = TriState::True;
-
-          if(m_onEmergencyStop)
-            EventLoop::call(
-              [this]()
-              {
-                m_onEmergencyStop();
-              });
-        }
+            if(m_emergencyStop != stopState)
+            {
+              m_emergencyStop = stopState;
+              m_onEmergencyStop();
+            }
+          });
       }
       break;
     }
@@ -296,96 +451,166 @@ void ClientKernel::receive(const Message& message)
 
 void ClientKernel::trackPowerOn()
 {
-  m_ioContext.post(
-    [this]()
-    {
-      if(m_trackPowerOn != TriState::True || m_emergencyStop != TriState::False)
+  assert(isEventLoopThread());
+
+  if(m_trackPowerOn != TriState::True || m_emergencyStop != TriState::False)
+  {
+    m_ioContext.post(
+      [this]()
+      {
         send(LanXSetTrackPowerOn());
-    });
+      });
+  }
 }
 
 void ClientKernel::trackPowerOff()
 {
-  m_ioContext.post(
-    [this]()
-    {
-      if(m_trackPowerOn != TriState::False)
+  assert(isEventLoopThread());
+
+  if(m_trackPowerOn != TriState::False)
+  {
+    m_ioContext.post(
+      [this]()
+      {
         send(LanXSetTrackPowerOff());
-    });
+      });
+  }
 }
 
 void ClientKernel::emergencyStop()
 {
-  m_ioContext.post(
-    [this]()
-    {
-      if(m_emergencyStop != TriState::True)
+  assert(isEventLoopThread());
+
+  if(m_emergencyStop != TriState::True)
+  {
+    m_ioContext.post(
+      [this]()
+      {
         send(LanXSetStop());
-    });
+      });
+  }
 }
 
 void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags changes, uint32_t functionNumber)
 {
-  if(has(changes, DecoderChangeFlags::EmergencyStop | DecoderChangeFlags::Direction | DecoderChangeFlags::Throttle | DecoderChangeFlags::SpeedSteps))
-  {
-    LanXSetLocoDrive cmd;
-    cmd.setAddress(decoder.address, decoder.protocol == DecoderProtocol::DCCLong);
+  const uint16_t address = decoder.address;
+  const bool longAddress = decoder.protocol == DecoderProtocol::DCCLong;
 
-    switch(decoder.speedSteps)
+  const Direction direction = decoder.direction;
+  const float throttle = decoder.throttle;
+  const int speedSteps = decoder.speedSteps;
+  const bool isEStop = decoder.emergencyStop;
+
+  TriState funcVal = TriState::Undefined;
+  if(const auto& f = decoder.getFunction(functionNumber))
+    funcVal = toTriState(f->value);
+
+  if(m_isUpdatingDecoderFromKernel)
+  {
+    //This change was caused by Z21 message so there is not point
+    //on informing back Z21 with another message
+    //Skip updating LocoCache again which might already be
+    //at a new value (EventLoop is slower to process callbacks)
+    //But reset the guard to allow Train and other parts of code
+    //to react to this change and further edit decoder state
+    m_isUpdatingDecoderFromKernel = false;
+    return;
+  }
+
+  m_ioContext.post([this, address, longAddress, direction, throttle, speedSteps, isEStop, changes, functionNumber, funcVal]()
     {
-      case 14:
+      LanXSetLocoDrive cmd;
+      cmd.setAddress(address, longAddress);
+
+      cmd.setSpeedSteps(speedSteps);
+      int speedStep = Decoder::throttleToSpeedStep(throttle, cmd.speedSteps());
+
+      // Decoder max speed steps must be set for the message to be correctly
+      // distinguished from LAN_X_SET_LOCO_FUNCTION
+      cmd.setSpeedStep(speedStep);
+      cmd.setDirection(direction);
+
+      LocoCache &cache = getLocoCache(address);
+
+      bool changed = false;
+      if(has(changes, DecoderChangeFlags::Direction) && cache.direction != direction)
       {
-        const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 14);
-        cmd.db0 = 0x10;
-        if(decoder.emergencyStop)
-          cmd.speedAndDirection = 0x01;
-        else if(speedStep > 0)
-          cmd.speedAndDirection = speedStep + 1;
-        break;
+        changed = true;
       }
-      case 28:
+
+      if(has(changes, DecoderChangeFlags::Throttle | DecoderChangeFlags::SpeedSteps | DecoderChangeFlags::EmergencyStop))
       {
-        uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 28);
-        cmd.db0 = 0x12;
-        if(decoder.emergencyStop)
-          cmd.speedAndDirection = 0x01;
-        else if(speedStep > 0)
+        if(has(changes, DecoderChangeFlags::EmergencyStop) && isEStop != cache.isEStop)
         {
-          speedStep++;
-          cmd.speedAndDirection = ((speedStep & 0x01) << 4) | (speedStep >> 1);
+          if(isEStop)
+            cmd.setEmergencyStop();
+          changed = true;
         }
-        break;
+
+        if(!isEStop && (speedSteps != cache.speedSteps || speedStep != cache.speedStep))
+        {
+          changed = true;
+        }
       }
-      case 126:
-      case 128:
-      default:
+
+      if(has(changes, DecoderChangeFlags::FunctionValue))
       {
-        const uint8_t speedStep = Decoder::throttleToSpeedStep<uint8_t>(decoder.throttle, 126);
-        cmd.db0 = 0x13;
-        if(decoder.emergencyStop)
-          cmd.speedAndDirection = 0x01;
-        else if(speedStep > 0)
-          cmd.speedAndDirection = speedStep + 1;
-        break;
+        //This is independent of LanXSetLocoDrive
+        if(functionNumber <= LanXSetLocoFunction::functionNumberMax && funcVal != TriState::Undefined)
+        {
+          send(LanXSetLocoFunction(
+            address, longAddress,
+            static_cast<uint8_t>(functionNumber),
+            funcVal == TriState::True ? LanXSetLocoFunction::SwitchType::On : LanXSetLocoFunction::SwitchType::Off));
+        }
       }
-    }
 
-    assert(decoder.direction.value() != Direction::Unknown);
-    if(decoder.direction.value() == Direction::Forward)
-      cmd.speedAndDirection |= 0x80;
+      //Rescale everything to 126 steps
+      int oldTargetSpeedStep = cache.speedStep;
+      if(cache.speedSteps != 126)
+      {
+        oldTargetSpeedStep = float(oldTargetSpeedStep) / float(cache.speedSteps) * 126.0;
+      }
 
-    cmd.checksum = XpressNet::calcChecksum(*reinterpret_cast<const XpressNet::Message*>(&cmd.xheader));
-    postSend(cmd);
-  }
-  else if(has(changes, DecoderChangeFlags::FunctionValue))
-  {
-    if(functionNumber <= LanXSetLocoFunction::functionNumberMax)
-      if(const auto& f = decoder.getFunction(functionNumber))
-        postSend(LanXSetLocoFunction(
-          decoder.address, decoder.protocol == DecoderProtocol::DCCLong,
-          static_cast<uint8_t>(functionNumber),
-          f->value ? LanXSetLocoFunction::SwitchType::On : LanXSetLocoFunction::SwitchType::Off));
-  }
+      int newTargetSpeedStep = cmd.speedStep();
+      if(cmd.speedSteps() != 126)
+      {
+        newTargetSpeedStep = float(newTargetSpeedStep) / float(cmd.speedSteps()) * 126.0;
+      }
+
+      if(changed)
+      {
+        cache.speedSteps = cmd.speedSteps();
+        cache.speedStep = cmd.speedStep();
+        cache.direction = cmd.direction();
+        cache.isEStop = cmd.isEmergencyStop();
+
+        if(newTargetSpeedStep >= oldTargetSpeedStep)
+        {
+          cache.speedTrend = LocoCache::Trend::Ascending;
+          if(cache.lastReceivedSpeedStep > newTargetSpeedStep)
+            cache.lastReceivedSpeedStep = 0; //Reset to minimum
+        }
+        else
+        {
+          cache.speedTrend = LocoCache::Trend::Descending;
+          if(cache.lastReceivedSpeedStep < newTargetSpeedStep)
+            cache.lastReceivedSpeedStep = 126; //Reset to maximum
+        }
+        cache.speedTrendExplicitlySet = true;
+
+        //Update last seen time to ignore feedback messages of our own changes
+        //This potentially ignores also user commands coming from Z21 if issued
+        //In less than 1 seconds from now
+        cache.lastSetTime = std::chrono::steady_clock::now();
+      }
+
+      if(changed)
+      {
+        cmd.updateChecksum();
+        send(cmd);
+      }
+    });
 }
 
 bool ClientKernel::setOutput(uint16_t address, bool value)
@@ -506,11 +731,16 @@ void ClientKernel::onStart()
   send(LanSystemStateGetData());
 
   startKeepAliveTimer();
+  startInactiveDecoderPurgeTimer();
 }
 
 void ClientKernel::onStop()
 {
   send(LanLogoff());
+
+  m_keepAliveTimer.cancel();
+  m_inactiveDecoderPurgeTimer.cancel();
+  m_locoCache.clear();
 }
 
 void ClientKernel::send(const Message& message)
@@ -519,9 +749,9 @@ void ClientKernel::send(const Message& message)
   {
     if(m_config.debugLogRXTX)
       EventLoop::call(
-        [this, msg=toString(message)]()
+        [logId_=logId, msg=toString(message)]()
         {
-          Log::log(logId, LogMessage::D2001_TX_X, msg);
+          Log::log(logId_, LogMessage::D2001_TX_X, msg);
         });
   }
   else
@@ -570,6 +800,49 @@ void ClientKernel::keepAliveTimerExpired(const boost::system::error_code& ec)
   }
 
   startKeepAliveTimer();
+}
+
+void ClientKernel::startInactiveDecoderPurgeTimer()
+{
+  assert(ClientConfig::purgeInactiveDecoderInternal > 0);
+  m_inactiveDecoderPurgeTimer.expires_after(boost::asio::chrono::seconds(ClientConfig::purgeInactiveDecoderInternal));
+  m_inactiveDecoderPurgeTimer.async_wait(std::bind(&ClientKernel::inactiveDecoderPurgeTimerExpired, this, std::placeholders::_1));
+}
+
+void ClientKernel::inactiveDecoderPurgeTimerExpired(const boost::system::error_code& ec)
+{
+  if(ec)
+    return;
+
+  const auto purgeTime = std::chrono::steady_clock::now() - std::chrono::seconds(ClientConfig::purgeInactiveDecoderInternal);
+
+  auto it = m_locoCache.begin();
+  while(it != m_locoCache.end())
+  {
+    if(it->second.lastSetTime < purgeTime)
+    {
+      it = m_locoCache.erase(it);
+    }
+    else
+    {
+      it++;
+    }
+  }
+
+  startInactiveDecoderPurgeTimer();
+}
+
+ClientKernel::LocoCache& ClientKernel::getLocoCache(uint16_t dccAddr)
+{
+  auto it = m_locoCache.find(dccAddr);
+  if(it == m_locoCache.end())
+  {
+    LocoCache item;
+    item.dccAddress = dccAddr;
+    it = m_locoCache.emplace(dccAddr, item).first;
+  }
+
+  return it->second;
 }
 
 }

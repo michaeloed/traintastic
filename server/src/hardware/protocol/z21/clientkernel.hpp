@@ -23,6 +23,8 @@
 #ifndef TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_Z21_CLIENTKERNEL_HPP
 #define TRAINTASTIC_SERVER_HARDWARE_PROTOCOL_Z21_CLIENTKERNEL_HPP
 
+#include <unordered_map>
+
 #include "kernel.hpp"
 #include <boost/asio/steady_timer.hpp>
 #include <traintastic/enum/tristate.hpp>
@@ -62,6 +64,7 @@ class ClientKernel final : public Kernel
   private:
     const bool m_simulation;
     boost::asio::steady_timer m_keepAliveTimer;
+    boost::asio::steady_timer m_inactiveDecoderPurgeTimer;
     BroadcastFlags m_broadcastFlags;
     int m_broadcastFlagsRetryCount;
     static constexpr int maxBroadcastFlagsRetryCount = 10;
@@ -81,12 +84,51 @@ class ClientKernel final : public Kernel
     uint8_t m_firmwareVersionMinor;
     std::function<void(HardwareType, uint8_t, uint8_t)> m_onHardwareInfoChanged;
 
+    /*!
+     * \brief m_trackPowerOn caches command station track power state.
+     *
+     * \note It must be accessed only from event loop thread or from
+     * Z21::ClientKernel::onStart().
+     *
+     * \sa EventLoop
+     */
     TriState m_trackPowerOn;
+
+    /*!
+     * \brief m_emergencyStop caches command station emergency stop state.
+     *
+     * \note It must be accessed only from event loop thread or from
+     * Z21::ClientKernel::onStart().
+     *
+     * \sa EventLoop
+     */
     TriState m_emergencyStop;
     std::function<void(bool)> m_onTrackPowerOnChanged;
     std::function<void()> m_onEmergencyStop;
 
     DecoderController* m_decoderController = nullptr;
+
+    struct LocoCache
+    {
+      enum class Trend : bool
+      {
+          Ascending = 0,
+          Descending
+      };
+
+      uint16_t dccAddress = 0;
+      bool isEStop = false;
+      uint8_t speedStep = 0;
+      uint8_t speedSteps = 0;
+      uint8_t lastReceivedSpeedStep = 0; //Always in 126 steps
+      Trend speedTrend = Trend::Ascending;
+      bool speedTrendExplicitlySet = false;
+      Direction direction = Direction::Unknown;
+      std::chrono::steady_clock::time_point lastSetTime;
+    };
+
+    std::unordered_map<uint16_t, LocoCache> m_locoCache;
+    bool m_isUpdatingDecoderFromKernel = false;
 
     InputController* m_inputController = nullptr;
     std::array<TriState, rbusAddressMax - rbusAddressMin + 1> m_rbusFeedbackStatus;
@@ -116,7 +158,12 @@ class ClientKernel final : public Kernel
     void startKeepAliveTimer();
     void keepAliveTimerExpired(const boost::system::error_code& ec);
 
-  public:
+    void startInactiveDecoderPurgeTimer();
+    void inactiveDecoderPurgeTimerExpired(const boost::system::error_code &ec);
+
+    LocoCache &getLocoCache(uint16_t dccAddr);
+
+public:
     /**
      * @brief Create kernel and IO handler
      * @param[in] config Z21 client configuration

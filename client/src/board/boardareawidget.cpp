@@ -162,6 +162,7 @@ void BoardAreaWidget::tileObjectAdded(int16_t x, int16_t y, const ObjectPtr& obj
       break;
 
     case TileId::RailNXButton:
+      tryConnect("enabled");
       if(auto* nxButton = dynamic_cast<NXButtonRailTile*>(object.get())) /*[[likely]]*/
       {
         connect(nxButton, &NXButtonRailTile::isPressedChanged, this, handler);
@@ -333,6 +334,15 @@ DecouplerState BoardAreaWidget::getDecouplerState(const TileLocation& l) const
     if(const auto* p = object->getProperty("state"))
       return p->toEnum<DecouplerState>();
   return DecouplerState::Deactivated;
+}
+
+bool BoardAreaWidget::getNXButtonEnabled(const TileLocation& l) const
+{
+  if(auto object = std::dynamic_pointer_cast<NXButtonRailTile>(m_board.board().getTileObject(l)))
+  {
+    return object->getPropertyValueBool("enabled", false);
+  }
+  return false;
 }
 
 bool BoardAreaWidget::getNXButtonPressed(const TileLocation& l) const
@@ -518,6 +528,8 @@ void BoardAreaWidget::paintEvent(QPaintEvent* event)
 
       const TileId id = it.second.id();
       const TileRotate a = it.second.rotate();
+      const uint8_t state = it.second.state;
+      const bool isReserved = (state != 0);
       painter.setBrush(Qt::NoBrush);
 
       const QRectF r = drawTileRect(it.first.x - tileOriginX, it.first.y - tileOriginY, it.second.width(), it.second.height(), tileSize);
@@ -526,16 +538,11 @@ void BoardAreaWidget::paintEvent(QPaintEvent* event)
         case TileId::RailStraight:
         case TileId::RailCurve45:
         case TileId::RailCurve90:
-        case TileId::RailCross45:
-        case TileId::RailCross90:
-        case TileId::RailBridge45Left:
-        case TileId::RailBridge45Right:
-        case TileId::RailBridge90:
         case TileId::RailBufferStop:
         case TileId::RailTunnel:
         case TileId::RailOneWay:
         case TileId::RailLink:
-          tilePainter.draw(id, r, a);
+          tilePainter.draw(id, r, a, isReserved);
           break;
 
         case TileId::RailTurnoutLeft45:
@@ -548,24 +555,35 @@ void BoardAreaWidget::paintEvent(QPaintEvent* event)
         case TileId::RailTurnout3Way:
         case TileId::RailTurnoutSingleSlip:
         case TileId::RailTurnoutDoubleSlip:
-          tilePainter.drawTurnout(id, r, a, getTurnoutPosition(it.first));
+          tilePainter.drawTurnout(id, r, a, static_cast<TurnoutPosition>(state), getTurnoutPosition(it.first));
+          break;
+
+        case TileId::RailCross45:
+        case TileId::RailCross90:
+          tilePainter.drawCross(id, r, a, static_cast<CrossState>(state));
+          break;
+
+        case TileId::RailBridge45Left:
+        case TileId::RailBridge45Right:
+        case TileId::RailBridge90:
+          tilePainter.drawBridge(id, r, a, state & 0x01, state & 0x02);
           break;
 
         case TileId::RailSensor:
-          tilePainter.drawSensor(id, r, a, getSensorState(it.first));
+          tilePainter.drawSensor(id, r, a, isReserved, getSensorState(it.first));
           break;
 
         case TileId::RailSignal2Aspect:
         case TileId::RailSignal3Aspect:
-          tilePainter.drawSignal(id, r, a, getSignalAspect(it.first));
+          tilePainter.drawSignal(id, r, a, isReserved, getSignalAspect(it.first));
           break;
 
         case TileId::RailBlock:
-          tilePainter.drawBlock(id, r, a, m_board.board().getTileObject(it.first));
+          tilePainter.drawBlock(id, r, a, state & 0x01, state & 0x02, m_board.board().getTileObject(it.first));
           break;
 
         case TileId::RailDirectionControl:
-          tilePainter.drawDirectionControl(id, r, a, getDirectionControlState(it.first));
+          tilePainter.drawDirectionControl(id, r, a, isReserved, getDirectionControlState(it.first));
           break;
 
         case TileId::PushButton:
@@ -573,11 +591,11 @@ void BoardAreaWidget::paintEvent(QPaintEvent* event)
           break;
 
         case TileId::RailDecoupler:
-          tilePainter.drawRailDecoupler(r, a, getDecouplerState(it.first));
+          tilePainter.drawRailDecoupler(r, a, isReserved, getDecouplerState(it.first));
           break;
 
         case TileId::RailNXButton:
-          tilePainter.drawRailNX(r, a, getNXButtonPressed(it.first));
+          tilePainter.drawRailNX(r, a, isReserved, getNXButtonEnabled(it.first), getNXButtonPressed(it.first));
           break;
 
         case TileId::None:
