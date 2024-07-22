@@ -23,6 +23,7 @@
 #include "messagepump.hpp"
 #include <cassert>
 #include <dbt.h>
+#include <string>
 #include "../../utils/setthreadname.hpp"
 
 namespace Windows {
@@ -116,7 +117,7 @@ LRESULT CALLBACK MessagePump::windowProc(_In_ HWND hWnd, _In_ UINT uMsg, _In_ WP
       {
         if(IsEqualGUID(b->dbcc_classguid, GUID_DEVINTERFACE_COMPORT))
         {
-          s_onDeviceChangeComPort(wParam, b->dbcc_name);
+          s_onDeviceChangeComPort(wParam, std::string(b->dbcc_name));
         }
       }
       break;
