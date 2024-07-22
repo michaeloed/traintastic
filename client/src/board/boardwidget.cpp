@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2020-2023 Reinder Feenstra
+ * Copyright (C) 2020-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -409,7 +409,8 @@ BoardWidget::BoardWidget(std::shared_ptr<Board> object, QWidget* parent) :
               isRailSignal(tileId) ||
               tileId == TileId::RailDirectionControl ||
               tileId == TileId::RailDecoupler ||
-              tileId == TileId::PushButton)
+              tileId == TileId::PushButton ||
+              tileId == TileId::Switch)
           {
             cursorShape = Qt::PointingHandCursor;
           }
@@ -418,6 +419,17 @@ BoardWidget::BoardWidget(std::shared_ptr<Board> object, QWidget* parent) :
             if(auto nxButton = m_object->getTileObject(tl); nxButton && nxButton->getPropertyValueBool("enabled", false))
             {
               cursorShape = Qt::PointingHandCursor;
+            }
+          }
+          else if(tileId == TileId::RailSensor)
+          {
+            if(auto sensor = m_object->getTileObject(tl))
+            {
+              if(auto* simulateTrigger = sensor->getMethod("simulate_trigger");
+                  simulateTrigger && simulateTrigger->getAttributeBool(AttributeName::Enabled, false))
+              {
+                cursorShape = Qt::PointingHandCursor;
+              }
             }
           }
         }
@@ -513,7 +525,7 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
       else // drop
       {
         m_object->moveTile(m_tileMoveX, m_tileMoveY, x, y, m_boardArea->mouseMoveTileRotate(), false,
-          [this](const bool& /*r*/, std::optional<const Error> /*error*/)
+          [](const bool& /*r*/, std::optional<const Error> /*error*/)
           {
           });
         m_tileMoveStarted = false;
@@ -559,7 +571,7 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
             h >= 1 && h <= std::numeric_limits<uint8_t>::max())
         {
           m_object->resizeTile(m_tileResizeX, m_tileResizeY, w, h,
-            [this](const bool& /*r*/, std::optional<const Error> /*error*/)
+            [](const bool& /*r*/, std::optional<const Error> /*error*/)
             {
             });
 
@@ -571,7 +583,7 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
     else if(act == m_editActionDelete)
     {
       m_object->deleteTile(x, y,
-        [this](const bool& /*r*/, std::optional<const Error> /*error*/)
+        [](const bool& /*r*/, std::optional<const Error> /*error*/)
         {
         });
     }
@@ -581,7 +593,7 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
       const Qt::KeyboardModifiers kbMod = QApplication::keyboardModifiers();
       if(kbMod == Qt::NoModifier || kbMod == Qt::ControlModifier)
         m_object->addTile(x, y, m_boardArea->mouseMoveTileRotate(), classId, kbMod == Qt::ControlModifier,
-          [this](const bool& /*r*/, std::optional<const Error> /*error*/)
+          [](const bool& /*r*/, std::optional<const Error> /*error*/)
           {
           });
     }
@@ -596,6 +608,16 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
       {
         if(auto* m = obj->getMethod("pressed"))
           m->call();
+      }
+      else if(tileId == TileId::Switch)
+      {
+        if(auto* value = obj->getProperty("value")) /*[[likely]]*/
+        {
+          if(auto* setValue = obj->getMethod("set_value")) /*[[likely]]*/
+          {
+            callMethod(*setValue, nullptr, !value->toBool());
+          }
+        }
       }
       else if(tileId == TileId::RailDecoupler)
       {
@@ -675,6 +697,10 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
           }
         }
       }
+      else if(tileId == TileId::RailSensor)
+      {
+        obj->callMethod("simulate_trigger");
+      }
       else
       {
         AbstractProperty* value = nullptr;
@@ -731,7 +757,7 @@ void BoardWidget::tileClicked(int16_t x, int16_t y)
                 tilePainter.drawDirectionControl(tileId, image.rect(), tileRotate, false, static_cast<DirectionControlState>(n));
 
               connect(menu.addAction(QIcon(QPixmap::fromImage(image)), translateEnum(value->enumName(), n)), &QAction::triggered,
-                [this, setValue, n]()
+                [setValue, n]()
                 {
                   callMethod(*setValue, nullptr, n);
                 });

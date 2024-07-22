@@ -1,4 +1,7 @@
 {
+  "name": {
+    "since": "0.3"
+  },
   "on_train_assigned": {
     "parameters": [
       {
@@ -20,7 +23,8 @@
       {
         "name": "direction"
       }
-    ]
+    ],
+    "since": "0.3"
   },
   "on_train_removed": {
     "parameters": [
@@ -31,5 +35,33 @@
         "name": "block"
       }
     ]
+  },
+  "on_train_entered": {
+    "parameters": [
+      {
+        "name": "train"
+      },
+      {
+        "name": "block"
+      },
+      {
+        "name": "direction"
+      }
+    ],
+    "since": "0.3"
+  },
+  "on_train_left": {
+    "parameters": [
+      {
+        "name": "train"
+      },
+      {
+        "name": "block"
+      },
+      {
+        "name": "direction"
+      }
+    ],
+    "since": "0.3"
   }
 }

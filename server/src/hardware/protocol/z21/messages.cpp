@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2023 Reinder Feenstra
+ * Copyright (C) 2019-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -91,18 +91,61 @@ std::string toString(const Message& message, bool raw)
             raw = true;
           break;
 
+        case LAN_X_TURNOUT_INFO:
+        {
+          if(message.dataLen() == sizeof(LanXTurnoutInfo))
+          {
+            const auto& reply = static_cast<const LanXTurnoutInfo&>(message);
+            s = "LAN_X_TURNOUT_INFO";
+            s.append(" address=").append(std::to_string(reply.address()));
+            s.append(" port=").append(std::to_string(reply.state()));
+            s.append(" unknown=").append(std::to_string(reply.positionUnknown()));
+          }
+          else
+          {
+            const auto& getTurnoutInfo = static_cast<const LanXGetTurnoutInfo&>(message);
+            s = "LAN_X_GET_TURNOUT_INFO";
+            s.append(" address=").append(std::to_string(getTurnoutInfo.address()));
+          }
+          break;
+        }
+
         case LAN_X_SET_TURNOUT:
         {
           const auto& setTurnout = static_cast<const LanXSetTurnout&>(message);
           s = "LAN_X_SET_TURNOUT";
-          s.append(" linear_address=").append(std::to_string(setTurnout.linearAddress()));
           s.append(" address=").append(std::to_string(setTurnout.address()));
-          s.append(" port=").append(std::to_string(setTurnout.port()));
+          s.append(" port=").append(setTurnout.port() ? "1" : "2");
           s.append(" activate=").append(setTurnout.activate() ? "yes" : "no");
           s.append(" queue=").append(setTurnout.queue() ? "yes" : "no");
           break;
         }
-
+        case LAN_X_EXT_ACCESSORY_INFO:
+        {
+          if(message.dataLen() == sizeof(LanXExtAccessoryInfo))
+          {
+            const auto& reply = static_cast<const LanXExtAccessoryInfo&>(message);
+            s = "LAN_X_EXT_ACCESSORY_INFO";
+            s.append(" address=").append(std::to_string(reply.address()));
+            s.append(" db2=").append(std::to_string(reply.aspect()));
+            s.append(" unknown=").append(std::to_string(!reply.isDataValid()));
+          }
+          else
+          {
+            const auto& getAccessoryInfo = static_cast<const LanXGetExtAccessoryInfo&>(message);
+            s = "LAN_X_GET_EXT_ACCESSORY_INFO";
+            s.append(" address=").append(std::to_string(getAccessoryInfo.address()));
+          }
+          break;
+        }
+        case LAN_X_SET_EXT_ACCESSORY:
+        {
+          const auto& setExtAccessory = static_cast<const LanXSetExtAccessory&>(message);
+          s = "LAN_X_SET_EXT_ACCESSORY";
+          s.append(" address=").append(std::to_string(setExtAccessory.address()));
+          s.append(" db2=").append(std::to_string(setExtAccessory.db2));
+          break;
+        }
         case LAN_X_BC:
           if(message == LanXBCTrackPowerOff())
             s = "LAN_X_BC_TRACK_POWER_OFF";
@@ -110,6 +153,8 @@ std::string toString(const Message& message, bool raw)
             s = "LAN_X_BC_TRACK_POWER_ON";
           else if(message == LanXBCTrackShortCircuit())
             s = "LAN_X_BC_TRACK_SHORT_CIRCUIT";
+          else if(message == LanXUnknownCommand())
+            s = "LAN_X_UNKNOWN_COMMAND";
           else
             raw = true;
           break;
@@ -300,16 +345,7 @@ LanXLocoInfo::LanXLocoInfo(const Decoder& decoder) :
 
 void LanX::updateChecksum(uint8_t len)
 {
-  uint8_t val = XpressNet::calcChecksum(*reinterpret_cast<const XpressNet::Message*>(&xheader), len);
-  uint8_t* checksum = &xheader + len + 1;
-#ifdef __MINGW32__
-  #pragma GCC diagnostic push
-  #pragma GCC diagnostic ignored "-Wstringop-overflow"
-#endif
-  *checksum = val;
-#ifdef __MINGW32__
-  #pragma GCC diagnostic pop  
-#endif
+  *(reinterpret_cast<uint8_t*>(this) + sizeof(LanX) + len) = XpressNet::calcChecksum(*reinterpret_cast<const XpressNet::Message*>(&xheader), len);
 }
 
 bool LanX::isChecksumValid(const LanX &lanX)

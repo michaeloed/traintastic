@@ -11,6 +11,9 @@
 #define ServerExeName "traintastic-server.exe"
 #define ClientExeName "traintastic-client.exe"
 
+#define CompanySubKey "SOFTWARE\traintastic.org"
+#define AppSubKey CompanySubKey + "\Traintastic"
+
 [Setup]
 AppId={{7E509202-257F-4859-B8FA-D87D636342BB}
 AppName={#Name}
@@ -40,16 +43,18 @@ Name: en; MessagesFile: "compiler:Default.isl,en-us.isl"
 Name: nl; MessagesFile: "compiler:Languages\Dutch.isl,nl-nl.isl"
 Name: de; MessagesFile: "compiler:Languages\German.isl,de-de.isl"
 Name: it; MessagesFile: "compiler:Languages\Italian.isl,it-it.isl"
+Name: sv; MessagesFile: "Languages\Swedish.isl,sv-se.isl"
+Name: fr; MessagesFile: "compiler:Languages\French.isl,fr-fr.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "firewall_traintastic"; Description: "{cm:FirewallAllowTraintasticClient}"; GroupDescription: "{cm:WindowsFirewall}"; Check: InstallServer
-Name: "firewall_wlanmaus"; Description: "{cm:FirewallAllowWLANmausZ21}"; GroupDescription: "{cm:WindowsFirewall}"; Check: InstallServer
+Name: "firewall_traintastic"; Description: "{cm:firewall_allow_traintastic_client}"; GroupDescription: "{cm:windows_firewall}"; Check: InstallServer
+Name: "firewall_wlanmaus"; Description: "{cm:firewall_allow_wlanmaus_z21}"; GroupDescription: "{cm:windows_firewall}"; Check: InstallServer
 
 [Files]
 ; Server
 Source: "..\..\server\build\{#ServerExeName}"; DestDir: "{app}\server"; Flags: ignoreversion; Check: InstallServer
-Source: "..\..\server\thirdparty\lua5.3\bin\win64\lua53.dll"; DestDir: "{app}\server"; Flags: ignoreversion; Check: InstallServer
+Source: "..\..\server\thirdparty\lua5.4\bin\win64\lua54.dll"; DestDir: "{app}\server"; Flags: ignoreversion; Check: InstallServer
 Source: "..\..\server\thirdparty\libarchive\bin\archive.dll"; DestDir: "{app}\server"; Flags: ignoreversion; Check: InstallServer
 Source: "..\..\server\thirdparty\zlib\bin\zlib1.dll"; DestDir: "{app}\server"; Flags: ignoreversion; Check: InstallServer
 ; Client
@@ -73,9 +78,9 @@ Source: "..\..\client\build\Release\vc_redist.x64.exe"; DestDir: {tmp}; Flags: d
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; StatusMsg: "Installing VC++ redistributables..."; Parameters: "/quiet /norestart"; Check: VC2019RedistNeedsInstall; Flags: waituntilterminated
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Traintastic server (TCP)"" dir=in program=""{app}\server\{#ServerExeName}"" protocol=TCP localport=5740 action=allow"; StatusMsg: "{cm:AddFirewallRuleTraintasticClient} (TCP)"; Flags: runhidden; Check: InstallServer; Tasks: firewall_traintastic
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Traintastic server (UDP)"" dir=in program=""{app}\server\{#ServerExeName}"" protocol=UDP localport=5740 action=allow"; StatusMsg: "{cm:AddFirewallRuleTraintasticClient} (UDP)"; Flags: runhidden; Check: InstallServer; Tasks: firewall_traintastic
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Traintastic server (WLANmaus/Z21)"" dir=in program=""{app}\server\{#ServerExeName}"" protocol=UDP localport=21105 action=allow"; StatusMsg: "{cm:AddFirewallRuleWLANmausZ21}"; Flags: runhidden; Check: InstallServer; Tasks: firewall_wlanmaus
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Traintastic server (TCP)"" dir=in program=""{app}\server\{#ServerExeName}"" protocol=TCP localport=5740 action=allow"; StatusMsg: "{cm:add_firewall_rule_traintastic_client} (TCP)"; Flags: runhidden; Check: InstallServer; Tasks: firewall_traintastic
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Traintastic server (UDP)"" dir=in program=""{app}\server\{#ServerExeName}"" protocol=UDP localport=5740 action=allow"; StatusMsg: "{cm:add_firewall_rule_traintastic_client} (UDP)"; Flags: runhidden; Check: InstallServer; Tasks: firewall_traintastic
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Traintastic server (WLANmaus/Z21)"" dir=in program=""{app}\server\{#ServerExeName}"" protocol=UDP localport=21105 action=allow"; StatusMsg: "{cm:add_firewall_rule_wlanmaus_z21}"; Flags: runhidden; Check: InstallServer; Tasks: firewall_wlanmaus
 
 [InstallDelete]
 ; Delete old translation files (TODO: remove in 0.4)
@@ -97,10 +102,16 @@ Name: "{autodesktop}\{#Name} server"; Filename: "{app}\server\{#ServerExeName}";
 Name: "{autoprograms}\{#Name}\{#Name} client"; Filename: "{app}\client\{#ClientExeName}"; Check: InstallClient
 Name: "{autodesktop}\{#Name} client"; Filename: "{app}\client\{#ClientExeName}"; Tasks: desktopicon; Check: InstallClient
 
+[Registry]
+Root: HKLM; Subkey: "{#CompanySubKey}"; Flags: uninsdeletekeyifempty
+Root: HKLM; Subkey: "{#AppSubKey}"; Flags: uninsdeletekey
+
+[INI]
+Filename: {commonappdata}\traintastic\traintastic-client.ini; Section: general_; Key: language; String: {code:GetTraintasticClientLanguage}; Flags: uninsdeleteentry uninsdeletesectionifempty;
+
 [Code]
 const
-  InstallerSubKeyName = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{7E509202-257F-4859-B8FA-D87D636342BB}_is1';
-  TraintasticComponentsValueName = 'TraintasticComponents';
+  ComponentsValueName = 'Components';
 var
   ComponentsPage : TWizardPage;
   ClientAndServerRadioButton : TRadioButton;
@@ -118,12 +129,12 @@ end;
 
 procedure RegWriteTraintasticComponents(Value: String);
 begin
-  RegWriteStringValue(HKEY_LOCAL_MACHINE, InstallerSubKeyName, TraintasticComponentsValueName, Value);
+  RegWriteStringValue(HKEY_LOCAL_MACHINE, '{#AppSubKey}', ComponentsValueName, Value);
 end;
 
 function RegReadTraintasticComponents: String;
 begin
-  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, InstallerSubKeyName, TraintasticComponentsValueName, Result) then
+  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, '{#AppSubKey}', ComponentsValueName, Result) then
     Result := '';
 end;
 
@@ -164,7 +175,7 @@ begin
   ComponentsPage := CreateCustomPage(wpSelectComponents, SetupMessage(msgWizardSelectComponents), SetupMessage(msgSelectComponentsDesc));
 
   ClientAndServerRadioButton := TNewRadioButton.Create(ComponentsPage);
-  ClientAndServerRadioButton.Caption := ExpandConstant('{cm:ClientAndServer}');
+  ClientAndServerRadioButton.Caption := ExpandConstant('{cm:client_and_server}');
   ClientAndServerRadioButton.Checked := (Components = 'ClientAndServer');
   ClientAndServerRadioButton.Font.Style := [fsBold];
   ClientAndServerRadioButton.Height := ScaleY(23);
@@ -172,14 +183,14 @@ begin
   ClientAndServerRadioButton.OnClick := @ComponentRadioButtonClick;
 
   Lbl := TLabel.Create(ComponentsPage);
-  Lbl.Caption := ExpandConstant('{cm:ClientAndServerDesc}');
+  Lbl.Caption := ExpandConstant('{cm:Client_and_server_desc}');
   Lbl.Top := ClientAndServerRadioButton.Top + ClientAndServerRadioButton.Height;
   Lbl.Left := ScaleX(17);
   Lbl.Height := ScaleY(23);
   Lbl.Parent := ComponentsPage.Surface;
 
   ClientOnlyRadioButton := TNewRadioButton.Create(ComponentsPage);
-  ClientOnlyRadioButton.Caption := ExpandConstant('{cm:ClientOnly}');
+  ClientOnlyRadioButton.Caption := ExpandConstant('{cm:client_only}');
   ClientOnlyRadioButton.Checked := (Components = 'ClientOnly');
   ClientOnlyRadioButton.Font.Style := [fsBold];
   ClientOnlyRadioButton.Top := Lbl.Top + Lbl.Height + ScaleY(10);
@@ -188,11 +199,24 @@ begin
   ClientOnlyRadioButton.OnClick := @ComponentRadioButtonClick;
 
   Lbl := TLabel.Create(ComponentsPage);
-  Lbl.Caption := ExpandConstant('{cm:ClientOnlyDesc}');
+  Lbl.Caption := ExpandConstant('{cm:client_only_desc}');
   Lbl.Top := ClientOnlyRadioButton.Top + ClientOnlyRadioButton.Height;
   Lbl.Left := ScaleX(17);
   Lbl.Height := ScaleY(23);
   Lbl.Parent := ComponentsPage.Surface;
+end;
+
+function GetTraintasticClientLanguage(Param: String) : String;
+begin
+  case ActiveLanguage of
+    'nl': Result := 'nl-nl';
+    'de': Result := 'de-de';
+    'it': Result := 'it-it';
+    'sv': Result := 'sv-se';
+    'fr': Result := 'fr-fr';
+  else
+    Result := 'en-us';
+  end;
 end;
 
 function VC2019RedistNeedsInstall: Boolean;

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 include(../shared/traintastic.cmake)
 project(traintastic-server VERSION ${TRAINTASTIC_VERSION} DESCRIPTION "Traintastic server")
 include(GNUInstallDirs)
+include(CTest)
 include(../shared/translations/traintastic-lang.cmake)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -17,37 +18,31 @@ else()
 endif()
 
 if(ENABLE_CLANG_TIDY)
-  set(CMAKE_CXX_CLANG_TIDY clang-tidy -checks=-*,readability-*,-readability-braces-around-statements,-readability-implicit-bool-conversion,-readability-magic-numbers)
+  set(CMAKE_CXX_CLANG_TIDY clang-tidy)
 endif()
 
-add_executable(traintastic-server src/main.cpp src/options.hpp
-        src/hardware/interface/P50XInterface.cpp
-        src/hardware/interface/P50XInterface.h)
-add_executable(traintastic-server-test test/main.cpp)
-
+add_executable(traintastic-server src/main.cpp src/options.hpp)
 add_dependencies(traintastic-server traintastic-lang)
-add_dependencies(traintastic-server-test traintastic-lang)
-
-target_compile_definitions(traintastic-server-test PRIVATE -DTRAINTASTIC_TEST)
-
 set_target_properties(traintastic-server PROPERTIES CXX_STANDARD 17)
-set_target_properties(traintastic-server-test PROPERTIES CXX_STANDARD 17)
-
 target_include_directories(traintastic-server PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}
   ../shared/src)
-
 target_include_directories(traintastic-server SYSTEM PRIVATE
   ../shared/thirdparty
   thirdparty)
 
-target_include_directories(traintastic-server-test PRIVATE
-  ${CMAKE_CURRENT_BINARY_DIR}
-  ../shared/src)
-
-target_include_directories(traintastic-server-test SYSTEM PRIVATE
-  ../shared/thirdparty
-  thirdparty)
+if(BUILD_TESTING)
+  add_executable(traintastic-server-test test/main.cpp)
+  add_dependencies(traintastic-server-test traintastic-lang)
+  target_compile_definitions(traintastic-server-test PRIVATE -DTRAINTASTIC_TEST)
+  set_target_properties(traintastic-server-test PROPERTIES CXX_STANDARD 17)
+  target_include_directories(traintastic-server-test PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ../shared/src)
+  target_include_directories(traintastic-server-test SYSTEM PRIVATE
+    ../shared/thirdparty
+    thirdparty)
+endif()
 
 file(GLOB SOURCES
   "src/board/*.hpp"
@@ -105,10 +100,10 @@ file(GLOB SOURCES
   "src/hardware/programming/lncv/*.cpp"
   "src/hardware/protocol/*.hpp"
   "src/hardware/protocol/*.cpp"
-  "src/hardware/protocol/dccplusplus/*.hpp"
-  "src/hardware/protocol/dccplusplus/*.cpp"
-  "src/hardware/protocol/dccplusplus/iohandler/*.hpp"
-  "src/hardware/protocol/dccplusplus/iohandler/*.cpp"
+  "src/hardware/protocol/dccex/*.hpp"
+  "src/hardware/protocol/dccex/*.cpp"
+  "src/hardware/protocol/dccex/iohandler/*.hpp"
+  "src/hardware/protocol/dccex/iohandler/*.cpp"
   "src/hardware/protocol/ecos/*.hpp"
   "src/hardware/protocol/ecos/*.cpp"
   "src/hardware/protocol/ecos/iohandler/*.hpp"
@@ -189,6 +184,13 @@ file(GLOB TEST_SOURCES
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DENABLE_LOG_DEBUG")
 
+### OPTIONS ###
+
+if(NO_LOCALHOST_ONLY_SETTING)
+  message(STATUS "Setting localhost only removed")
+  add_definitions(-DNO_LOCALHOST_ONLY_SETTING)
+endif()
+
 ### PLATFORM ###
 
 if(UNIX AND NOT APPLE)
@@ -205,12 +207,14 @@ if(LINUX)
   find_package(PkgConfig REQUIRED)
 
   # libsystemd:
-  pkg_check_modules(LIBSYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+  pkg_check_modules(LIBSYSTEMD IMPORTED_TARGET libsystemd)
   if(${LIBSYSTEMD_FOUND})
     add_definitions(-DHAS_LIBSYSTEMD)
     list(APPEND SOURCES "src/os/linux/serialportlistimplsystemd.hpp" "src/os/linux/serialportlistimplsystemd.cpp")
     target_link_libraries(traintastic-server PRIVATE PkgConfig::LIBSYSTEMD)
-    target_link_libraries(traintastic-server-test PRIVATE PkgConfig::LIBSYSTEMD)
+    if(BUILD_TESTING)
+      target_link_libraries(traintastic-server-test PRIVATE PkgConfig::LIBSYSTEMD)
+    endif()
   endif()
 else()
   # socket CAN is only available on linux:
@@ -218,12 +222,18 @@ else()
   list(REMOVE_ITEM SOURCES ${SOCKET_CAN_SOURCES})
 endif()
 
+if(APPLE)
+  add_definitions(-D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION) # remove once boost is updated
+endif()
+
 if(WIN32)
   add_definitions(-D_WIN32_WINNT=0x0601)
   file(GLOB SOURCES_WINDOWS "src/os/windows/*.hpp" "src/os/windows/*.cpp")
   list(APPEND SOURCES ${SOURCES_WINDOWS} src/version.rc ../shared/gfx/appicon.rc)
   target_link_libraries(traintastic-server PRIVATE bcrypt setupapi)
-  target_link_libraries(traintastic-server-test PRIVATE bcrypt setupapi)
+  if(BUILD_TESTING)
+    target_link_libraries(traintastic-server-test PRIVATE bcrypt setupapi)
+  endif()
 endif()
 
 ### COMPILER ###
@@ -238,11 +248,15 @@ else()
   #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
 
   target_link_libraries(traintastic-server PRIVATE pthread)
-  target_link_libraries(traintastic-server-test PRIVATE pthread)
+  if(BUILD_TESTING)
+    target_link_libraries(traintastic-server-test PRIVATE pthread)
+  endif()
 
   if(NOT APPLE)
     target_link_libraries(traintastic-server PRIVATE stdc++fs)
-    target_link_libraries(traintastic-server-test PRIVATE stdc++fs)
+    if(BUILD_TESTING)
+      target_link_libraries(traintastic-server-test PRIVATE stdc++fs)
+    endif()
   endif()
 endif()
 
@@ -252,7 +266,9 @@ if(WIN32 AND NOT MSVC)
   # On MinGW ws2_32.dll needs explicit linking
   # Also mswsock.dll is needed for AcceptEx() used by Boost.Asio
   target_link_libraries(traintastic-server PRIVATE ws2_32 mswsock)
-  target_link_libraries(traintastic-server-test PRIVATE ws2_32 mswsock)
+  if(BUILD_TESTING)
+    target_link_libraries(traintastic-server-test PRIVATE ws2_32 mswsock)
+  endif()
 endif()
 
 # boost
@@ -261,8 +277,10 @@ if(LINUX)
 
   target_include_directories(traintastic-server SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
   target_link_libraries(traintastic-server PRIVATE ${Boost_LIBRARIES})
-  target_include_directories(traintastic-server-test SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
-  target_link_libraries(traintastic-server-test PRIVATE ${Boost_LIBRARIES})
+  if(BUILD_TESTING)
+    target_include_directories(traintastic-server-test SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
+    target_link_libraries(traintastic-server-test PRIVATE ${Boost_LIBRARIES})
+  endif()
 else()
   add_definitions(
     -DBOOST_ALL_NO_LIB
@@ -289,7 +307,9 @@ else()
   endif()
 
   target_include_directories(traintastic-server SYSTEM PRIVATE thirdparty/boost)
-  target_include_directories(traintastic-server-test SYSTEM PRIVATE thirdparty/boost)
+  if(BUILD_TESTING)
+    target_include_directories(traintastic-server-test SYSTEM PRIVATE thirdparty/boost)
+  endif()
 
   file(GLOB SOURCES_BOOST "thirdparty/boost/libs/program_options/src/*.cpp")
   list(APPEND SOURCES ${SOURCES_BOOST})
@@ -318,8 +338,10 @@ else()
 endif()
 target_include_directories(traintastic-server PRIVATE ${ZLIB_INCLUDE_DIRS})
 target_link_libraries(traintastic-server PRIVATE ${ZLIB_LIBRARIES})
-target_include_directories(traintastic-server-test PRIVATE ${ZLIB_INCLUDE_DIRS})
-target_link_libraries(traintastic-server-test PRIVATE ${ZLIB_LIBRARIES})
+if(BUILD_TESTING)
+  target_include_directories(traintastic-server-test PRIVATE ${ZLIB_INCLUDE_DIRS})
+  target_link_libraries(traintastic-server-test PRIVATE ${ZLIB_LIBRARIES})
+endif()
 
 # libarchive
 if(WIN32)
@@ -340,51 +362,77 @@ if(WIN32)
   add_custom_command(TARGET traintastic-server POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/libarchive/bin/archive.dll" .)
 elseif(APPLE)
-  set(LibArchive_INCLUDE_DIRS "/usr/local/opt/libarchive/include")
-  set(LibArchive_LIBRARIES "/usr/local/opt/libarchive/lib/libarchive.dylib")
+  find_path(LibArchive_INCLUDE_DIRS
+    NAMES archive.h
+    PATHS
+    "/usr/local/opt/libarchive/include" # x86_64
+    "/opt/homebrew/opt/libarchive/include" # arm64
+    )
+  find_library(LibArchive_LIBRARIES
+    NAMES archive libarchive
+    PATHS
+    "/usr/local/opt/libarchive/lib/" # x86_64
+    "/opt/homebrew/opt/libarchive/lib" # arm64
+    )
 else()
   find_package(LibArchive REQUIRED)
 endif()
 target_include_directories(traintastic-server PRIVATE ${LibArchive_INCLUDE_DIRS})
 target_link_libraries(traintastic-server PRIVATE ${LibArchive_LIBRARIES})
-target_include_directories(traintastic-server-test PRIVATE ${LibArchive_INCLUDE_DIRS})
-target_link_libraries(traintastic-server-test PRIVATE ${LibArchive_LIBRARIES})
+if(BUILD_TESTING)
+  target_include_directories(traintastic-server-test PRIVATE ${LibArchive_INCLUDE_DIRS})
+  target_link_libraries(traintastic-server-test PRIVATE ${LibArchive_LIBRARIES})
+endif()
 
-# liblua5.3
+# liblua5.4
 if(WIN32)
   add_definitions(-DLUA_BUILD_AS_DLL)
-  set(LUA_INCLUDE_DIR "thirdparty/lua5.3/include")
+  set(LUA_INCLUDE_DIR "thirdparty/lua5.4/include")
 
   if(MSVC)
-      set(LUA_LIBRARIES lua53)
+      set(LUA_LIBRARIES lua54)
       add_custom_command(TARGET traintastic-server PRE_LINK
-        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.4/bin/win64/lua54.def" /out:lua54.lib /machine:x64)
       add_custom_command(TARGET traintastic-server-test PRE_LINK
-        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.def" /out:lua53.lib /machine:x64)
+        COMMAND lib "/def:${PROJECT_SOURCE_DIR}/thirdparty/lua5.4/bin/win64/lua54.def" /out:lua54.lib /machine:x64)
   else()
       # MinGW can directly link .dll without import lib
-      set(LUA_LIBRARIES "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll")
+      set(LUA_LIBRARIES "${PROJECT_SOURCE_DIR}/thirdparty/lua5.4/bin/win64/lua54.dll")
   endif()
 
 
-  # copy lua53.dll to build directory, to be able to run the tests:
+  # copy lua54.dll to build directory, to be able to run the tests:
   add_custom_command(TARGET traintastic-server-test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.3/bin/win64/lua53.dll" .)
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/thirdparty/lua5.4/bin/win64/lua54.dll" .)
 elseif(APPLE)
-  set(LUA_INCLUDE_DIR "/usr/local/opt/lua@5.3/include/lua")
-  set(LUA_LIBRARIES "/usr/local/opt/lua@5.3/lib/liblua5.3.dylib")
+  find_path(LUA_INCLUDE_DIR
+    NAMES lua.h
+    PATHS
+    "/usr/local/opt/lua@5.4/include/lua" # x86_64
+    "/opt/homebrew/opt/lua@5.4/include/lua" # arm64
+    )
+  find_library(LUA_LIBRARIES
+    NAMES lua5.4 liblua5.4
+    PATHS
+    "/usr/local/opt/lua@5.4/lib" # x86_64
+    "/opt/homebrew/opt/lua@5.4/lib" # arm64
+    )
 else()
-  find_package(Lua 5.3 REQUIRED)
+  find_package(Lua 5.4 REQUIRED)
 endif()
 target_include_directories(traintastic-server PRIVATE ${LUA_INCLUDE_DIR})
 target_link_libraries(traintastic-server PRIVATE ${LUA_LIBRARIES})
-target_include_directories(traintastic-server-test PRIVATE ${LUA_INCLUDE_DIR})
-target_link_libraries(traintastic-server-test PRIVATE ${LUA_LIBRARIES})
+if(BUILD_TESTING)
+  target_include_directories(traintastic-server-test PRIVATE ${LUA_INCLUDE_DIR})
+  target_link_libraries(traintastic-server-test PRIVATE ${LUA_LIBRARIES})
+endif()
 
 ### LIBRARIES END ###
 
 target_sources(traintastic-server PRIVATE ${SOURCES})
-target_sources(traintastic-server-test PRIVATE ${TEST_SOURCES} ${SOURCES})
+if(BUILD_TESTING)
+  target_sources(traintastic-server-test PRIVATE ${TEST_SOURCES} ${SOURCES})
+endif()
 
 ### CODE COVERAGE ###
 
@@ -397,12 +445,21 @@ install(TARGETS traintastic-server
     RUNTIME DESTINATION "/opt/traintastic/bin/"
 )
 
+if(INSTALL_TRANSLATIONS)
+  install(FILES ${TRANSLATION_FILES} DESTINATION "/opt/traintastic/translations")
+endif()
+
+if(INSTALL_SYSTEMD_SERVICE)
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/debian/traintastic-server.service DESTINATION "/lib/systemd/system")
+endif()
+
 ### TEST ###
 
-include(CTest)
-include(Catch)
-target_include_directories(traintastic-server-test PRIVATE thirdparty/catch2)
-catch_discover_tests(traintastic-server-test)
+if(BUILD_TESTING)
+  include(Catch)
+  target_include_directories(traintastic-server-test PRIVATE thirdparty/catch2)
+  catch_discover_tests(traintastic-server-test)
+endif()
 
 ### Doxygen ###
 
@@ -432,5 +489,6 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Reinder Feenstra")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://traintastic.org")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "traintastic-data (>= ${CPACK_PACKAGE_VERSION})")
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/debian/postinst")
 
 include(CPack)

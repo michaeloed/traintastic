@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2020-2023 Reinder Feenstra
+ * Copyright (C) 2020-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -27,15 +27,15 @@
 #include "../../../../world/world.hpp"
 #include "../../../../utils/displayname.hpp"
 
-TurnoutRailTile::TurnoutRailTile(World& world, std::string_view _id, TileId tileId, size_t connectors) :
-  RailTile(world, _id, tileId),
+TurnoutRailTile::TurnoutRailTile(World& world, std::string_view _id, TileId tileId_, size_t connectors) :
+  RailTile(world, _id, tileId_),
   m_node{*this, connectors},
   name{this, "name", std::string(_id), PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::ScriptReadOnly},
   position{this, "position", TurnoutPosition::Unknown, PropertyFlags::ReadWrite | PropertyFlags::StoreState | PropertyFlags::ScriptReadOnly},
   outputMap{this, "output_map", nullptr, PropertyFlags::ReadOnly | PropertyFlags::Store | PropertyFlags::SubObject | PropertyFlags::NoScript},
   setPosition{*this, "set_position", MethodFlags::ScriptCallable, [this](TurnoutPosition value) { return doSetPosition(value); }}
 {
-  assert(isRailTurnout(tileId));
+  assert(isRailTurnout(tileId_));
 
   const bool editable = contains(m_world.state.value(), WorldState::Edit);
 
@@ -43,6 +43,7 @@ TurnoutRailTile::TurnoutRailTile(World& world, std::string_view _id, TileId tile
   Attributes::addEnabled(name, editable);
   m_interfaceItems.add(name);
 
+  Attributes::addDisplayName(position, DisplayName::BoardTile::Turnout::position);
   Attributes::addObjectEditor(position, false);
   // position is added by sub class
 
@@ -66,9 +67,32 @@ bool TurnoutRailTile::reserve(TurnoutPosition turnoutPosition, bool dryRun)
       return false;
     }
 
-    RailTile::reserve(static_cast<uint8_t>(turnoutPosition));
+    RailTile::setReservedState(static_cast<uint8_t>(turnoutPosition));
   }
   return true;
+}
+
+bool TurnoutRailTile::release(bool dryRun)
+{
+  //! \todo check occupancy sensor, once supported
+
+  if(!dryRun)
+  {
+    RailTile::release();
+  }
+  return true;
+}
+
+void TurnoutRailTile::destroying()
+{
+  outputMap->parentObject.setValueInternal(nullptr);
+  RailTile::addToWorld();
+}
+
+void TurnoutRailTile::addToWorld()
+{
+  outputMap->parentObject.setValueInternal(shared_from_this());
+  RailTile::addToWorld();
 }
 
 void TurnoutRailTile::worldEvent(WorldState state, WorldEvent event)
@@ -87,14 +111,25 @@ bool TurnoutRailTile::isValidPosition(TurnoutPosition value)
   return values->contains(static_cast<int64_t>(value));
 }
 
-bool TurnoutRailTile::doSetPosition(TurnoutPosition value)
+bool TurnoutRailTile::doSetPosition(TurnoutPosition value, bool skipAction)
 {
   if(!isValidPosition(value))
   {
     return false;
   }
-  (*outputMap)[value]->execute();
+  if(!skipAction)
+    (*outputMap)[value]->execute();
   position.setValueInternal(value);
   positionChanged(*this, value);
   return true;
+}
+
+void TurnoutRailTile::connectOutputMap()
+{
+  outputMap->onOutputStateMatchFound.connect([this](TurnoutPosition pos)
+    {
+      doSetPosition(pos, true);
+    });
+
+  //TODO: disconnect somewhere?
 }

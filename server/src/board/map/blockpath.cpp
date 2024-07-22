@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2023 Reinder Feenstra
+ * Copyright (C) 2023-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -45,6 +45,12 @@ static bool contains(const std::vector<std::pair<std::weak_ptr<T1>, T2>>& values
       return item.first.lock() == value;
     });
   return it != values.end();
+}
+
+template <typename T>
+static inline bool operator ==(const std::weak_ptr<T>& a, const std::weak_ptr<T>& b)
+{
+    return !a.owner_before(b) && !b.owner_before(a);
 }
 
 std::vector<std::shared_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBlock)
@@ -95,11 +101,11 @@ std::vector<std::shared_ptr<BlockPath>> BlockPath::find(BlockRailTile& startBloc
     const auto& nextNode = current.link->getNext(*current.node);
     auto& tile = nextNode.tile();
 
-    switch(tile.tileId())
+    switch(tile.tileId.value())
     {
       case TileId::RailBlock:
       {
-        if(current.node->tile().tileId() == TileId::RailNXButton)
+        if(current.node->tile().tileId == TileId::RailNXButton)
         {
           current.path->m_nxButtonTo = current.node->tile().shared_ptr<NXButtonRailTile>();
         }
@@ -293,6 +299,54 @@ BlockPath::BlockPath(BlockRailTile& block, BlockSide side)
 {
 }
 
+bool BlockPath::operator ==(const BlockPath& other) const noexcept
+{
+  return
+    (&m_fromBlock == &other.m_fromBlock) &&
+    (m_fromSide == other.m_fromSide) &&
+    (m_toBlock == other.m_toBlock) &&
+    (m_toSide == other.m_toSide) &&
+    (m_tiles == other.m_tiles) &&
+    (m_turnouts == other.m_turnouts) &&
+    (m_directionControls == other.m_directionControls) &&
+    (m_crossings == other.m_crossings) &&
+    (m_bridges == other.m_bridges) &&
+    (m_signals == other.m_signals) &&
+    (m_nxButtonFrom == other.m_nxButtonFrom) &&
+    (m_nxButtonTo == other.m_nxButtonTo);
+}
+
+bool BlockPath::isReady() const
+{
+  for(const auto& [turnoutWeak, position] : m_turnouts)
+  {
+    auto turnout = turnoutWeak.lock();
+    if(!turnout) /*[[unlikely]]*/
+    {
+      return false;
+    }
+    if(turnout->position != position)
+    {
+      return false;
+    }
+  }
+
+  for(const auto& [directionControlWeak, state] : m_directionControls)
+  {
+    auto directionControl = directionControlWeak.lock();
+    if(!directionControl) /*[[unlikely]]*/
+    {
+      return false;
+    }
+    if(directionControl->state != state && directionControl->state != DirectionControlState::Both)
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 std::shared_ptr<NXButtonRailTile> BlockPath::nxButtonFrom() const
 {
   return m_nxButtonFrom.lock();
@@ -310,7 +364,7 @@ bool BlockPath::reserve(const std::shared_ptr<Train>& train, bool dryRun)
     return false;
   }
 
-  if(!m_fromBlock.reserve(train, m_fromSide, dryRun))
+  if(!m_fromBlock.reserve(shared_from_this(), train, m_fromSide, dryRun))
   {
     assert(dryRun);
     return false;
@@ -318,7 +372,7 @@ bool BlockPath::reserve(const std::shared_ptr<Train>& train, bool dryRun)
 
   if(auto toBlock = m_toBlock.lock()) /*[[likely]]*/
   {
-    if(!toBlock->reserve(train, m_toSide, dryRun))
+    if(!toBlock->reserve(shared_from_this(), train, m_toSide, dryRun))
     {
       assert(dryRun);
       return false;
@@ -432,6 +486,114 @@ bool BlockPath::reserve(const std::shared_ptr<Train>& train, bool dryRun)
     if(auto nxButton = m_nxButtonTo.lock())
     {
       nxButton->reserve();
+    }
+  }
+
+  return true;
+}
+
+bool BlockPath::release(bool dryRun)
+{
+  if(!dryRun && !release(true)) // dry run first, to make sure it will succeed (else we need rollback support)
+  {
+    return false;
+  }
+
+  if(!m_fromBlock.release(m_fromSide, dryRun))
+  {
+    assert(dryRun);
+    return false;
+  }
+
+  if(auto toBlock = m_toBlock.lock()) /*[[likely]]*/
+  {
+    if(!toBlock->release(m_toSide, dryRun))
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+  else
+  {
+    return false;
+  }
+
+  for(const auto& item : m_turnouts)
+  {
+    if(auto turnout = item.first.lock())
+    {
+      if(!turnout->release(dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  for(const auto& item : m_crossings)
+  {
+    if(auto cross = item.first.lock())
+    {
+      if(!cross->release(dryRun))
+      {
+        assert(dryRun);
+        return false;
+      }
+    }
+    else /*[[unlikely]]*/
+    {
+      assert(dryRun);
+      return false;
+    }
+  }
+
+  if(!dryRun)
+  {
+    for(const auto& item : m_directionControls)
+    {
+      if(auto directionControl = item.first.lock()) /*[[likely]]*/
+      {
+        directionControl->release();
+      }
+    }
+
+    for(const auto& [bridgeWeak, path] : m_bridges)
+    {
+      if(auto bridge = bridgeWeak.lock()) /*[[likely]]*/
+      {
+        bridge->release(path);
+      }
+    }
+
+    for(const auto& signalWeak : m_signals)
+    {
+      if(auto signal = signalWeak.lock()) /*[[likely]]*/
+      {
+        signal->release();
+      }
+    }
+
+    for(const auto& tileWeak : m_tiles)
+    {
+      if(auto tile = tileWeak.lock()) /*[[likely]]*/
+      {
+        static_cast<RailTile&>(*tile).release();
+      }
+    }
+
+    if(auto nxButton = m_nxButtonFrom.lock())
+    {
+      nxButton->release();
+    }
+
+    if(auto nxButton = m_nxButtonTo.lock())
+    {
+      nxButton->release();
     }
   }
 

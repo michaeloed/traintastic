@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2021-2023 Reinder Feenstra
+ * Copyright (C) 2021-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,6 +26,7 @@
 #include "../../decoder/decoderchangeflags.hpp"
 #include "../../protocol/dcc/dcc.hpp"
 #include "../../input/inputcontroller.hpp"
+#include "../../output/outputcontroller.hpp"
 #include "../../../core/eventloop.hpp"
 #include "../../../log/log.hpp"
 #include "../../../utils/inrange.hpp"
@@ -70,6 +71,39 @@ void ClientKernel::receive(const Message& message)
 
       switch(lanX.xheader)
       {
+        case LAN_X_TURNOUT_INFO:
+          if(message.dataLen() == sizeof(LanXTurnoutInfo))
+          {
+            const auto& reply = static_cast<const LanXTurnoutInfo&>(message);
+            OutputPairValue value = OutputPairValue::Undefined;
+            if(!reply.positionUnknown())
+            {
+              value = reply.state() ? OutputPairValue::Second : OutputPairValue::First;
+            }
+
+            EventLoop::call(
+              [this, address=reply.address(), value]()
+              {
+                m_outputController->updateOutputValue(OutputChannel::Accessory, address, value);
+              });
+          }
+          break;
+
+        case LAN_X_EXT_ACCESSORY_INFO:
+          if(message.dataLen() == sizeof(LanXExtAccessoryInfo))
+          {
+            const auto& reply = static_cast<const LanXExtAccessoryInfo&>(message);
+            if(reply.isDataValid())
+            {
+              EventLoop::call(
+                [this, address=reply.address(), value=reply.aspect()]()
+                {
+                  m_outputController->updateOutputValue(OutputChannel::DCCext, address, value);
+                });
+            }
+          }
+          break;
+
         case LAN_X_BC:
           if(message == LanXBCTrackPowerOff() || message == LanXBCTrackShortCircuit())
           {
@@ -79,8 +113,9 @@ void ClientKernel::receive(const Message& message)
                 if(m_trackPowerOn != TriState::False)
                 {
                   m_trackPowerOn = TriState::False;
-                  if(m_onTrackPowerOnChanged)
-                    m_onTrackPowerOnChanged(false);
+                  m_emergencyStop = TriState::False;
+                  if(m_onTrackPowerChanged)
+                    m_onTrackPowerChanged(false, false);
                 }
               });
           }
@@ -89,11 +124,12 @@ void ClientKernel::receive(const Message& message)
             EventLoop::call(
               [this]()
               {
-                if(m_trackPowerOn != TriState::True)
+                if(m_trackPowerOn != TriState::True || m_emergencyStop != TriState::False)
                 {
                   m_trackPowerOn = TriState::True;
-                  if(m_onTrackPowerOnChanged)
-                    m_onTrackPowerOnChanged(true);
+                  m_emergencyStop = TriState::False;
+                  if(m_onTrackPowerChanged)
+                    m_onTrackPowerChanged(true, false);
                 }
               });
           }
@@ -108,8 +144,10 @@ void ClientKernel::receive(const Message& message)
                 if(m_emergencyStop != TriState::True)
                 {
                   m_emergencyStop = TriState::True;
-                  if(m_onEmergencyStop)
-                    m_onEmergencyStop();
+                  m_trackPowerOn = TriState::True;
+
+                  if(m_onTrackPowerChanged)
+                    m_onTrackPowerChanged(true, true);
                 }
               });
           }
@@ -411,17 +449,14 @@ void ClientKernel::receive(const Message& message)
 
         EventLoop::call([this, trackPowerOn, stopState]()
           {
-            if(m_trackPowerOn != trackPowerOn)
+            if(m_trackPowerOn != trackPowerOn || m_emergencyStop != stopState)
             {
               m_trackPowerOn = trackPowerOn;
-              if(m_onTrackPowerOnChanged)
-                m_onTrackPowerOnChanged(trackPowerOn == TriState::True);
-            }
-
-            if(m_emergencyStop != stopState)
-            {
               m_emergencyStop = stopState;
-              m_onEmergencyStop();
+
+              if(m_onTrackPowerChanged)
+                m_onTrackPowerChanged(trackPowerOn == TriState::True,
+                                      stopState == TriState::True);
             }
           });
       }
@@ -467,7 +502,7 @@ void ClientKernel::trackPowerOff()
 {
   assert(isEventLoopThread());
 
-  if(m_trackPowerOn != TriState::False)
+  if(m_trackPowerOn != TriState::False || m_emergencyStop != TriState::False)
   {
     m_ioContext.post(
       [this]()
@@ -481,7 +516,7 @@ void ClientKernel::emergencyStop()
 {
   assert(isEventLoopThread());
 
-  if(m_emergencyStop != TriState::True)
+  if(m_trackPowerOn != TriState::True || m_emergencyStop != TriState::True)
   {
     m_ioContext.post(
       [this]()
@@ -613,17 +648,40 @@ void ClientKernel::decoderChanged(const Decoder& decoder, DecoderChangeFlags cha
     });
 }
 
-bool ClientKernel::setOutput(uint16_t address, bool value)
+bool ClientKernel::setOutput(OutputChannel channel, uint16_t address, OutputValue value)
 {
   assert(inRange<uint32_t>(address, outputAddressMin, outputAddressMax));
 
-  m_ioContext.post(
-    [this, address, value]()
+  if(channel == OutputChannel::Accessory)
+  {
+    m_ioContext.post(
+      [this, address, port=std::get<OutputPairValue>(value) == OutputPairValue::Second]()
+      {
+        send(LanXSetTurnout(address, port, true));
+        // TODO: sent deactivate after switch time, at least 50ms, see documentation
+        // TODO: add some kind of queue if queing isn't supported?? requires at least v1.24 (DR5000 v1.5.5 has v1.29)
+      });
+    return true;
+  }
+  else if(channel == OutputChannel::DCCext)
+  {
+    if(m_firmwareVersionMajor == 1 && m_firmwareVersionMinor < 40)
     {
-      send(LanXSetTurnout(address, value, true));
-    });
+      Log::log(logId, LogMessage::W2020_DCCEXT_RCN213_IS_NOT_SUPPORTED);
+      return false;
+    }
 
-  return true;
+    if(inRange<int16_t>(std::get<int16_t>(value), std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max())) /*[[likely]]*/
+    {
+      m_ioContext.post(
+        [this, address, data=static_cast<uint8_t>(std::get<int16_t>(value))]()
+        {
+          send(LanXSetExtAccessory(address, data));
+        });
+      return true;
+    }
+  }
+  return false;
 }
 
 void ClientKernel::simulateInputChange(uint32_t channel, uint32_t address, SimulateInputAction action)

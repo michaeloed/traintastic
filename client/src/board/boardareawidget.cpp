@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2020-2023 Reinder Feenstra
+ * Copyright (C) 2020-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,14 +26,18 @@
 #include <QPaintEvent>
 #include <QtMath>
 #include <QApplication>
+#include <QToolTip>
+#include <traintastic/locale/locale.hpp>
 #include "boardwidget.hpp"
 #include "getboardcolorscheme.hpp"
 #include "tilepainter.hpp"
 #include "../network/board.hpp"
+#include "../network/object.tpp"
 #include "../network/object/blockrailtile.hpp"
 #include "../network/object/nxbuttonrailtile.hpp"
 #include "../network/abstractproperty.hpp"
 #include "../network/abstractvectorproperty.hpp"
+#include "../utils/enum.hpp"
 #include "../utils/rectf.hpp"
 #include "../settings/boardsettings.hpp"
 
@@ -169,6 +173,12 @@ void BoardAreaWidget::tileObjectAdded(int16_t x, int16_t y, const ObjectPtr& obj
       }
       break;
 
+    case TileId::Switch:
+      tryConnect("color_off");
+      tryConnect("color_on");
+      tryConnect("value");
+      break;
+
     case TileId::None:
     case TileId::RailStraight:
     case TileId::RailCurve45:
@@ -183,6 +193,13 @@ void BoardAreaWidget::tileObjectAdded(int16_t x, int16_t y, const ObjectPtr& obj
     case TileId::RailOneWay:
     case TileId::RailLink:
     case TileId::ReservedForFutureExpension:
+      break;
+
+    case TileId::Label:
+      tryConnect("background_color");
+      tryConnect("text");
+      tryConnect("text_align");
+      tryConnect("text_color");
       break;
   }
 }
@@ -358,6 +375,137 @@ TileLocation BoardAreaWidget::pointToTileLocation(const QPoint& p)
 {
   const int pxPerTile = getTileSize() - 1;
   return TileLocation{static_cast<int16_t>(p.x() / pxPerTile + boardLeft()), static_cast<int16_t>(p.y() / pxPerTile + boardTop())};
+}
+
+QString BoardAreaWidget::getTileToolTip(const TileLocation& l) const
+{
+  const auto tileId = m_board.board().getTileId(l);
+
+  if(isRailTurnout(tileId))
+  {
+    if(auto turnout = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + turnout->getPropertyValueString("name") + "</b>";
+      if(auto* position = turnout->getProperty("position")) /*[[likely]]*/
+      {
+        text.append("<br>" + position->displayName() + ": " + translateEnum(*position));
+      }
+      return text;
+    }
+  }
+  else if(isRailSignal(tileId))
+  {
+    if(auto signal = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + signal->getPropertyValueString("name") + "</b>";
+      if(auto* aspect = signal->getProperty("aspect")) /*[[likely]]*/
+      {
+        text.append("<br>" + aspect->displayName() + ": " + translateEnum(*aspect));
+      }
+      return text;
+    }
+  }
+  else if(tileId == TileId::RailSensor)
+  {
+    if(auto sensor = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + sensor->getPropertyValueString("name") + "</b>";
+      if(auto* state = sensor->getProperty("state")) /*[[likely]]*/
+      {
+        text.append("<br>" + state->displayName() + ": " + translateEnum(*state));
+      }
+      return text;
+    }
+  }
+  else if(tileId == TileId::RailBlock)
+  {
+    if(auto block = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + block->getPropertyValueString("name") + "</b>";
+      if(auto* state = block->getProperty("state")) /*[[likely]]*/
+      {
+        text.append("<br>" + state->displayName() + ": " + translateEnum(*state));
+      }
+      return text;
+    }
+  }
+  else if(tileId == TileId::RailDirectionControl)
+  {
+    if(auto directionControl = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + directionControl->getPropertyValueString("name") + "</b>";
+      if(auto* state = directionControl->getProperty("state")) /*[[likely]]*/
+      {
+        text.append("<br>" + state->displayName() + ": " + translateEnum(*state));
+      }
+      return text;
+    }
+  }
+  else if(tileId == TileId::RailSensor)
+  {
+    if(auto sensor = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + sensor->getPropertyValueString("name") + "</b>";
+      if(auto* state = sensor->getProperty("state")) /*[[likely]]*/
+      {
+        text.append("<br>" + state->displayName() + ": " + translateEnum(*state));
+      }
+      return text;
+    }
+  }
+  else if(tileId == TileId::Switch)
+  {
+    if(auto switch_ = m_board.board().getTileObject(l))
+    {
+      QString text = "<b>" + switch_->getPropertyValueString("name") + "</b>";
+      if(auto* value = switch_->getProperty("value")) /*[[likely]]*/
+      {
+        if(value->hasAttribute(AttributeName::AliasKeys)) /*[[likely]]*/
+        {
+          const QVariantList aliasKeys = value->getAttribute(AttributeName::AliasKeys, QVariant()).toList();
+          const QVariantList aliasValues = value->getAttribute(AttributeName::AliasValues, QVariant()).toList();
+
+          if(aliasKeys.size() == aliasValues.size()) /*[[likely]]*/
+          {
+            if(int index = aliasKeys.indexOf(value->toBool()); index != -1)
+            {
+              text.append("<br>" + value->displayName() + ": " + Locale::instance->parse(aliasValues[index].toString()));
+            }
+          }
+        }
+      }
+      return text;
+    }
+  }
+  else if(tileId == TileId::PushButton ||
+          tileId == TileId::RailNXButton)
+  {
+    if(auto tile = m_board.board().getTileObject(l))
+    {
+      return "<b>" + tile->getPropertyValueString("name") + "</b>";
+    }
+  }
+  return {};
+}
+
+bool BoardAreaWidget::event(QEvent* event)
+{
+  if(event->type() == QEvent::ToolTip)
+  {
+    QHelpEvent* helpEvent = static_cast<QHelpEvent*>(event);
+    const auto text = getTileToolTip(pointToTileLocation(helpEvent->pos()));
+    if (!text.isEmpty())
+    {
+      QToolTip::showText(helpEvent->globalPos(), text);
+    }
+    else
+    {
+      QToolTip::hideText();
+      event->ignore();
+    }
+    return true;
+  }
+  return QWidget::event(event);
 }
 
 void BoardAreaWidget::leaveEvent(QEvent* event)
@@ -596,6 +744,36 @@ void BoardAreaWidget::paintEvent(QPaintEvent* event)
 
         case TileId::RailNXButton:
           tilePainter.drawRailNX(r, a, isReserved, getNXButtonEnabled(it.first), getNXButtonPressed(it.first));
+          break;
+
+        case TileId::Label:
+        {
+          if(auto label = m_board.board().getTileObject(it.first)) /*[[likely]]*/
+          {
+            tilePainter.drawLabel(r, a,
+              label->getPropertyValueString("text"),
+              label->getPropertyValueEnum<TextAlign>("text_align", TextAlign::Center),
+              label->getPropertyValueEnum<Color>("text_color", Color::None),
+              label->getPropertyValueEnum<Color>("background_color", Color::None));
+          }
+          else
+          {
+            tilePainter.drawLabel(r, a);
+          }
+          break;
+        }
+        case TileId::Switch:
+          if(auto sw = m_board.board().getTileObject(it.first)) /*[[likely]]*/
+          {
+            tilePainter.drawSwitch(r,
+              sw->getPropertyValueBool("value", false),
+              sw->getPropertyValueEnum<Color>("color_on", Color::Yellow),
+              sw->getPropertyValueEnum<Color>("color_off", Color::Gray));
+          }
+          else
+          {
+            tilePainter.drawSwitch(r);
+          }
           break;
 
         case TileId::None:

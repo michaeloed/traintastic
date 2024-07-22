@@ -41,6 +41,7 @@ else()
 endif()
 
 add_executable(traintastic-client
+  data/data.qrc
   gfx/common.qrc
   gfx/dark/dark.qrc
   gfx/light/light.qrc
@@ -73,6 +74,8 @@ file(GLOB SOURCES
   "src/misc/*.cpp"
   "src/network/*.hpp"
   "src/network/*.cpp"
+  "src/network/create/*.hpp"
+  "src/network/create/*.cpp"
   "src/network/object/*.hpp"
   "src/network/object/*.cpp"
   "src/programming/lncv/*.hpp"
@@ -99,6 +102,10 @@ file(GLOB SOURCES
   "src/widget/status/*.cpp"
   "src/widget/throttle/*.hpp"
   "src/widget/throttle/*.cpp"
+  "src/wizard/*.hpp"
+  "src/wizard/*.cpp"
+  "src/wizard/page/*.hpp"
+  "src/wizard/page/*.cpp"
   "../shared/src/traintastic/locale/locale.cpp"
   "../shared/src/traintastic/utils/standardpaths.cpp"
   "thirdparty/QtWaitingSpinner/*.hpp"

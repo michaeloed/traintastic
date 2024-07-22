@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2023 Reinder Feenstra
+ * Copyright (C) 2019-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -49,13 +49,19 @@
 #include "network/objectvectorproperty.hpp"
 #include "network/method.hpp"
 #include "network/error.hpp"
+#include "network/callmethod.hpp"
 #include "programming/lncv/lncvprogrammer.hpp"
 #include "subwindow/objectsubwindow.hpp"
 #include "subwindow/boardsubwindow.hpp"
 #include "subwindow/throttlesubwindow.hpp"
+#include "widget/object/objecteditwidget.hpp"
 #include "widget/serverlogwidget.hpp"
 #include "utils/menu.hpp"
 #include "theme/theme.hpp"
+#include "wizard/introductionwizard.hpp"
+#include "wizard/newworldwizard.hpp"
+#include "wizard/newboardwizard.hpp"
+#include "wizard/addinterfacewizard.hpp"
 
 
 #include <QDesktopServices>
@@ -130,10 +136,22 @@ MainWindow::MainWindow(QWidget* parent) :
     m_actionNewWorld = menu->addAction(Theme::getIcon("world_new"), Locale::tr("qtapp.mainmenu:new_world"),
       [this]()
       {
-        if(m_connection)
-          if(const ObjectPtr& traintastic = m_connection->traintastic())
-            if(Method* method = traintastic->getMethod("new_world"))
-              method->call();
+        if(!m_connection) /*[[unlikely]]*/
+        {
+          return;
+        }
+
+        if(const ObjectPtr& traintastic = m_connection->traintastic()) /*[[likely]]*/
+        {
+          if(Method* method = traintastic->getMethod("new_world")) /*[[likely]]*/
+          {
+            callMethod(*method,
+              [this](std::optional<const Error> error)
+              {
+                m_newWorldRequested = !error;
+              });
+          }
+        }
       });
     m_actionNewWorld->setShortcut(QKeySequence::New);
     m_actionLoadWorld = menu->addAction(Theme::getIcon("world_load"), Locale::tr("qtapp.mainmenu:load_world") + "...", this, &MainWindow::loadWorld);
@@ -389,9 +407,35 @@ MainWindow::MainWindow(QWidget* parent) :
     menu->addAction(Locale::tr("hardware:identifications") + "...", [this](){ showObject("world.identifications", Locale::tr("hardware:identifications")); });
     boardsAction = m_menuObjects->addAction(Theme::getIcon("board"), Locale::tr("world:boards") + "...", [this](){ showObject("world.boards", Locale::tr("world:boards")); });
     m_menuObjects->addAction(Theme::getIcon("clock"), Locale::tr("world:clock") + "...", [this](){ showObject("world.clock", Locale::tr("world:clock")); });
-    trainsAction = m_menuObjects->addAction(Theme::getIcon("train"), Locale::tr("world:trains") + "...", [this](){ showObject("world.trains", Locale::tr("world:trains")); });
-    m_menuObjects->addAction(Locale::tr("world:rail_vehicles") + "...", [this](){ showObject("world.rail_vehicles", Locale::tr("world:rail_vehicles")); });
-    m_actionLuaScript = m_menuObjects->addAction(Theme::getIcon("lua"), Locale::tr("world:lua_scripts") + "...", [this](){ showObject("world.lua_scripts", Locale::tr("world:lua_scripts")); });
+    trainsAction = m_menuObjects->addAction(Theme::getIcon("train"), Locale::tr("world:trains") + "...",
+      [this]()
+      {
+        // FIXME: just a quick implementation to test if gives a better UX (position/size save/restore doesn't work yet, should extend SubWindow, but that needs a refactor then)
+        if(!m_trainAndRailVehiclesSubWindow)
+        {
+          m_trainAndRailVehiclesSubWindow = new QMdiSubWindow(this);
+          connect(m_trainAndRailVehiclesSubWindow, &QMdiSubWindow::destroyed, this,
+            [this](QObject* /*object*/)
+            {
+              m_trainAndRailVehiclesSubWindow = nullptr;
+            });
+          m_trainAndRailVehiclesSubWindow->setWindowFlags(m_trainAndRailVehiclesSubWindow->windowFlags() & ~Qt::WindowMaximizeButtonHint);
+          m_trainAndRailVehiclesSubWindow->setWindowTitle(Locale::tr("world:trains"));
+          auto* tabs = new QTabWidget(m_trainAndRailVehiclesSubWindow);
+          tabs->addTab(new ObjectEditWidget("world.trains"), Locale::tr("world:trains"));
+          tabs->addTab(new ObjectEditWidget("world.rail_vehicles"), Locale::tr("world:rail_vehicles"));
+          m_trainAndRailVehiclesSubWindow->setWidget(tabs);
+          m_mdiArea->addSubWindow(m_trainAndRailVehiclesSubWindow);
+          m_trainAndRailVehiclesSubWindow->setAttribute(Qt::WA_DeleteOnClose);
+          m_trainAndRailVehiclesSubWindow->resize(500, 400);
+          m_trainAndRailVehiclesSubWindow->show();
+        }
+        else
+        {
+          m_mdiArea->setActiveSubWindow(m_trainAndRailVehiclesSubWindow);
+        }
+      });
+    m_actionLuaScript = m_menuObjects->addAction(Theme::getIcon("lua"), Locale::tr("world:lua_scripts") + "...", this, &MainWindow::showLuaScriptsList);
 
     menu = menuBar()->addMenu(Locale::tr("qtapp.mainmenu:tools"));
     menu->addAction(Locale::tr("qtapp.mainmenu:settings") + "...",
@@ -411,7 +455,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_actionServerRestart = m_menuServer->addAction(Locale::tr("qtapp.mainmenu:restart_server"), this,
       [this]()
       {
-        if(QMessageBox::question(this, Locale::tr("qtapp.mainmenu:restart_server"), Locale::tr("qtapp.mainmenu:restart_server_question"), Locale::tr("qtapp.message_box:yes"), Locale::tr("qtapp.message_box:no"), "", 0, 1) != 0)
+        if(QMessageBox::question(this, Locale::tr("qtapp.mainmenu:restart_server"), Locale::tr("qtapp.mainmenu:restart_server_question")) != QMessageBox::Yes)
           return;
 
         if(m_connection)
@@ -422,7 +466,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_actionServerShutdown = m_menuServer->addAction(Locale::tr("qtapp.mainmenu:shutdown_server"), this,
       [this]()
       {
-        if(QMessageBox::question(this, Locale::tr("qtapp.mainmenu:shutdown_server"), Locale::tr("qtapp.mainmenu:shutdown_server_question"), Locale::tr("qtapp.message_box:yes"), Locale::tr("qtapp.message_box:no"), "", 0, 1) != 0)
+        if(QMessageBox::question(this, Locale::tr("qtapp.mainmenu:shutdown_server"), Locale::tr("qtapp.mainmenu:shutdown_server_question")) != QMessageBox::Yes)
           return;
 
         if(m_connection)
@@ -430,6 +474,19 @@ MainWindow::MainWindow(QWidget* parent) :
             if(Method* method = traintastic->getMethod("shutdown"))
               method->call();
       });
+    m_menuServer->addAction(Locale::tr("qtapp.mainmenu:about_server"), this,
+      [this]()
+      {
+        if(m_connection)
+        {
+          if(const ObjectPtr& traintastic = m_connection->traintastic())
+          {
+            QMessageBox::about(this, Locale::tr("qtapp.about:traintastic_server"),
+              traintastic->getPropertyValueString("about").replace("(c)", "&copy;"));
+          }
+        }
+      });
+
     m_menuProgramming = menu->addMenu(Locale::tr("qtapp.mainmenu:programming"));
     m_menuProgramming->addAction(Locale::tr("lncv_programmer:lncv_programmer") + "...",
       [this]()
@@ -442,7 +499,7 @@ MainWindow::MainWindow(QWidget* parent) :
       });
 
     menu = menuBar()->addMenu(Locale::tr("qtapp.mainmenu:help"));
-    menu->addAction(Locale::tr("qtapp.mainmenu:help"),
+    menu->addAction(Theme::getIcon("help"), Locale::tr("qtapp.mainmenu:help"),
       []()
       {
         const auto manual = QString::fromStdString((getManualPath() / "en-us.html").string());
@@ -451,6 +508,9 @@ MainWindow::MainWindow(QWidget* parent) :
         else
           QDesktopServices::openUrl(QString("https://traintastic.org/manual?version=" TRAINTASTIC_VERSION_FULL));
       })->setShortcut(QKeySequence::HelpContents);
+    auto* subMenu = menu->addMenu(Locale::tr("qtapp.mainmenu:wizards"));
+    subMenu->addAction(Locale::tr("wizard.introduction:title"), this, &MainWindow::showIntroductionWizard);
+    subMenu->addAction(Locale::tr("wizard.add_interface.welcome:title"), this, &MainWindow::showAddInterfaceWizard);
     //menu->addSeparator();
     //menu->addAction(Locale::tr("qtapp.mainmenu:about_qt") + "...", qApp, &QApplication::aboutQt);
     menu->addAction(Locale::tr("qtapp.mainmenu:about") + "...", this, &MainWindow::showAbout);
@@ -558,6 +618,11 @@ const ObjectPtr& MainWindow::world() const
   return m_connection ? m_connection->world() : null;
 }
 
+void MainWindow::showLuaScriptsList()
+{
+  showObject("world.lua_scripts", Locale::tr("world:lua_scripts"));
+}
+
 void MainWindow::connectToServer(const QString& url)
 {
   if(m_connection)
@@ -602,6 +667,8 @@ void MainWindow::changeEvent(QEvent* event)
 
 void MainWindow::worldChanged()
 {
+  m_newWorldWizard.reset();
+
   if(m_world)
     m_mdiArea->closeAllSubWindows();
 
@@ -644,6 +711,11 @@ void MainWindow::worldChanged()
 
   if(m_world)
   {
+    if(auto* name = m_world->getProperty("name"))
+    {
+      connect(name, &AbstractProperty::valueChanged, this, &MainWindow::updateWindowTitle);
+    }
+
     if(auto* state = m_world->getProperty("state"))
       connect(state, &AbstractProperty::valueChangedInt64, this, &MainWindow::worldStateChanged);
 
@@ -662,6 +734,18 @@ void MainWindow::worldChanged()
 
   static_cast<MainWindowStatusBar*>(statusBar())->worldChanged();
   updateWindowTitle();
+
+  if(m_newWorldRequested && m_world)
+  {
+    m_newWorldRequested = false;
+    m_newWorldWizard = std::make_unique<NewWorldWizard>(m_world, this);
+    connect(m_newWorldWizard.get(), &NewWorldWizard::finished,
+      [this]()
+      {
+        m_newWorldWizard.release()->deleteLater();
+      });
+    m_newWorldWizard->open();
+  }
 }
 
 void MainWindow::updateWindowTitle()
@@ -837,6 +921,40 @@ void MainWindow::showAbout()
     "<p><a href=\"https://traintastic.org\">traintastic.org</a></p>");
 }
 
+IntroductionWizard* MainWindow::showIntroductionWizard()
+{
+  auto* introductionWizard = new IntroductionWizard(this);
+  introductionWizard->setAttribute(Qt::WA_DeleteOnClose);
+  introductionWizard->open();
+  return introductionWizard;
+}
+
+AddInterfaceWizard* MainWindow::showAddInterfaceWizard()
+{
+  if(!m_world) /*[[unlikely]]*/
+  {
+    return nullptr;
+  }
+
+  auto* addInterfaceWizard = new AddInterfaceWizard(m_world, this);
+  addInterfaceWizard->setAttribute(Qt::WA_DeleteOnClose);
+  addInterfaceWizard->open();
+  return addInterfaceWizard;
+}
+
+NewBoardWizard* MainWindow::showNewBoardWizard(const ObjectPtr& board)
+{
+  if(!board) /*[[unlikely]]*/
+  {
+    return nullptr;
+  }
+
+  auto* newBoardWizard = new NewBoardWizard(board, this);
+  newBoardWizard->setAttribute(Qt::WA_DeleteOnClose);
+  newBoardWizard->open();
+  return newBoardWizard;
+}
+
 void MainWindow::connectionStateChanged()
 {
   const bool connected = m_connection && m_connection->state() == Connection::State::Connected;
@@ -911,11 +1029,13 @@ void MainWindow::updateActions()
   {
     m_mdiArea->addBackgroundAction(m_actionNewWorld);
     m_mdiArea->addBackgroundAction(m_actionLoadWorld);
+    m_mdiArea->addBackgroundAction(m_actionImportWorld);
   }
   else
   {
     m_mdiArea->removeBackgroundAction(m_actionNewWorld);
     m_mdiArea->removeBackgroundAction(m_actionLoadWorld);
+    m_mdiArea->removeBackgroundAction(m_actionImportWorld);
   }
 }
 

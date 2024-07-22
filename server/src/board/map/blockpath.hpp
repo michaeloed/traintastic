@@ -69,6 +69,11 @@ class BlockPath : public Path, public std::enable_shared_from_this<BlockPath>
 
     BlockPath(BlockRailTile& block, BlockSide side);
 
+    bool operator ==(const BlockPath& other) const noexcept;
+
+    //! \return \c true if all turnouts are in position and direction controls are allowed to pass.
+    bool isReady() const;
+
     bool hasNXButtons() const
     {
       return !m_nxButtonFrom.expired() && !m_nxButtonTo.expired();
@@ -98,6 +103,7 @@ class BlockPath : public Path, public std::enable_shared_from_this<BlockPath>
     std::shared_ptr<NXButtonRailTile> nxButtonTo() const;
 
     bool reserve(const std::shared_ptr<Train>& train, bool dryRun = false);
+    bool release(bool dryRun = false);
 };
 
 #endif

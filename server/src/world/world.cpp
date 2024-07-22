@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2023 Reinder Feenstra
+ * Copyright (C) 2019-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -72,7 +72,7 @@ using nlohmann::json;
 
 constexpr auto decoderListColumns = DecoderListColumn::Id | DecoderListColumn::Name | DecoderListColumn::Interface | DecoderListColumn::Protocol | DecoderListColumn::Address;
 constexpr auto inputListColumns = InputListColumn::Id | InputListColumn::Name | InputListColumn::Interface | InputListColumn::Channel | InputListColumn::Address;
-constexpr auto outputListColumns = OutputListColumn::Id | OutputListColumn::Name | OutputListColumn::Interface | OutputListColumn::Channel | OutputListColumn::Address;
+constexpr auto outputListColumns = OutputListColumn::Interface | OutputListColumn::Channel | OutputListColumn::Address;
 constexpr auto identificationListColumns = IdentificationListColumn::Id | IdentificationListColumn::Name | IdentificationListColumn::Interface /*| IdentificationListColumn::Channel*/ | IdentificationListColumn::Address;
 
 template<class T>
@@ -127,6 +127,23 @@ World::World(Private /*unused*/) :
   name{this, "name", "", PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::ScriptReadOnly},
   scale{this, "scale", WorldScale::H0, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::ScriptReadOnly, [this](WorldScale /*value*/){ updateScaleRatio(); }},
   scaleRatio{this, "scale_ratio", 87, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::ScriptReadOnly},
+  onlineWhenLoaded{this, "online_when_loaded", false, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::NoScript},
+  powerOnWhenLoaded{this, "power_on_when_loaded", false, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::NoScript,
+    [this](bool value)
+    {
+      if(!value)
+      {
+        runWhenLoaded = false; // can't run without power
+      }
+    }},
+  runWhenLoaded{this, "run_when_loaded", false, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::NoScript,
+    [this](bool value)
+    {
+      if(value)
+      {
+        powerOnWhenLoaded = true; // can't run without power
+      }
+    }},
   decoderControllers{this, "input_controllers", nullptr, PropertyFlags::ReadOnly | PropertyFlags::SubObject | PropertyFlags::NoStore},
   inputControllers{this, "input_controllers", nullptr, PropertyFlags::ReadOnly | PropertyFlags::SubObject | PropertyFlags::NoStore},
   outputControllers{this, "output_controllers", nullptr, PropertyFlags::ReadOnly | PropertyFlags::SubObject | PropertyFlags::NoStore},
@@ -287,6 +304,10 @@ World::World(Private /*unused*/) :
   Attributes::addVisible(scaleRatio, false);
   m_interfaceItems.add(scaleRatio);
 
+  m_interfaceItems.add(onlineWhenLoaded);
+  m_interfaceItems.add(powerOnWhenLoaded);
+  m_interfaceItems.add(runWhenLoaded);
+
   Attributes::addObjectEditor(decoderControllers, false);
   m_interfaceItems.add(decoderControllers);
   Attributes::addObjectEditor(inputControllers, false);
@@ -372,12 +393,12 @@ World::~World()
   deleteAll(*interfaces);
   deleteAll(*decoders);
   deleteAll(*inputs);
-  deleteAll(*outputs);
   deleteAll(*identifications);
   deleteAll(*boards);
   deleteAll(*trains);
   deleteAll(*railVehicles);
   deleteAll(*luaScripts);
+  luaScripts.setValueInternal(nullptr);
 }
 
 std::string World::getUniqueId(std::string_view prefix) const

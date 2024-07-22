@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2023 Reinder Feenstra
+ * Copyright (C) 2019-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -42,14 +42,20 @@ class HardwareListSubWindow;
 class LuaScriptsSubWindow;
 class ServerSettingsSubWindow;
 class ServerLogWidget;
+class NewWorldWizard;
+class IntroductionWizard;
+class AddInterfaceWizard;
+class NewBoardWizard;
 
-class MainWindow : public QMainWindow
+class MainWindow final : public QMainWindow
 {
   Q_OBJECT
 
   protected:
     std::shared_ptr<Connection> m_connection;
     ObjectPtr m_world;
+    bool m_newWorldRequested = false;
+    std::unique_ptr<NewWorldWizard> m_newWorldWizard;
     int m_clockRequest;
     ObjectPtr m_clock;
     QSplitter* m_splitter;
@@ -58,6 +64,7 @@ class MainWindow : public QMainWindow
     ServerLogWidget* m_serverLog;
     QMdiSubWindow* m_clockWindow = nullptr;
     QMap<QString, SubWindow*> m_subWindows;
+    QMdiSubWindow* m_trainAndRailVehiclesSubWindow = nullptr;
     // Main menu:
     QAction* m_actionConnectToServer;
     QAction* m_actionDisconnectFromServer;
@@ -128,6 +135,11 @@ class MainWindow : public QMainWindow
 
     const ObjectPtr& world() const;
     const ObjectPtr& worldClock() const { return m_clock; }
+
+    IntroductionWizard* showIntroductionWizard();
+    AddInterfaceWizard* showAddInterfaceWizard();
+    NewBoardWizard* showNewBoardWizard(const ObjectPtr& board);
+    void showLuaScriptsList();
 
   public slots:
     void connectToServer(const QString& url = QString());

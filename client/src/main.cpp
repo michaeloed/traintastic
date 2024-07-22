@@ -3,7 +3,7 @@
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2021,2023 Reinder Feenstra
+ * Copyright (C) 2019-2021,2023-2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -25,6 +25,7 @@
   #include <QSettings>
 #endif
 #include <QCommandLineParser>
+#include <QMessageBox>
 #include <version.hpp>
 #include "mainwindow.hpp"
 #include "settings/generalsettings.hpp"
@@ -32,6 +33,7 @@
 #include "style/materialdarkstyle.hpp"
 #include "style/materiallightstyle.hpp"
 #include "theme/theme.hpp"
+#include "wizard/introductionwizard.hpp"
 #include <traintastic/locale/locale.hpp>
 #include <traintastic/utils/standardpaths.hpp>
 
@@ -100,15 +102,25 @@ int main(int argc, char* argv[])
   const bool logMissingStrings = !DeveloperSettings::instance().logMissingStringsDir.value().isEmpty();
 
   const auto localePath = getLocalePath();
-  Locale::instance = std::make_unique<Locale>(localePath / "neutral.lang");
-  if(language != languageDefault && !DeveloperSettings::instance().dontLoadFallbackLanguage)
+  try
   {
-    Locale::instance = std::make_unique<Locale>(localePath / languageDefault.toStdString().append(".lang"), std::move(Locale::instance));
-    if(logMissingStrings)
-      const_cast<Locale*>(Locale::instance.get())->enableMissingLogging();
+    Locale::instance = std::make_unique<Locale>(localePath / "neutral.lang");
+
+    if(language != languageDefault && !DeveloperSettings::instance().dontLoadFallbackLanguage)
+    {
+      Locale::instance = std::make_unique<Locale>(localePath / languageDefault.toStdString().append(".lang"), std::move(Locale::instance));
+      if(logMissingStrings)
+        const_cast<Locale*>(Locale::instance.get())->enableMissingLogging();
+    }
+
+    Locale::instance = std::make_unique<Locale>(localePath / language.toStdString().append(".lang"), std::move(Locale::instance));
+  }
+  catch(const std::exception& e)
+  {
+    QMessageBox::critical(nullptr, "Error", QString::fromLatin1(e.what()));
+    return EXIT_FAILURE;
   }
 
-  Locale::instance = std::make_unique<Locale>(localePath / language.toStdString().append(".lang"), std::move(Locale::instance));
   if(logMissingStrings)
     const_cast<Locale*>(Locale::instance.get())->enableMissingLogging();
 
@@ -122,8 +134,23 @@ int main(int argc, char* argv[])
   else
     mw.show();
 
-  if(!mw.connection())
+  if(GeneralSettings::instance().showIntroductionWizard)
+  {
+    auto* introductionWizard = mw.showIntroductionWizard();
+    QObject::connect(introductionWizard, &IntroductionWizard::finished,
+      [&mw, connectTo=options.connectTo]()
+      {
+        if(!mw.connection())
+        {
+          mw.connectToServer(connectTo);
+        }
+      });
+    GeneralSettings::instance().showIntroductionWizard = false;
+  }
+  else if(!mw.connection())
+  {
     mw.connectToServer(options.connectTo);
+  }
 
   const unsigned  int r = app.exec();
 

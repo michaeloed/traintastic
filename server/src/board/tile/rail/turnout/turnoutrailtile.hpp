@@ -38,12 +38,16 @@ class TurnoutRailTile : public RailTile
     Node m_node;
 
   protected:
-    TurnoutRailTile(World& world, std::string_view _id, TileId tileId, size_t connectors);
+    TurnoutRailTile(World& world, std::string_view _id, TileId tileId_, size_t connectors);
 
+    void destroying() override;
+    void addToWorld() override;
     void worldEvent(WorldState state, WorldEvent event) override;
 
     bool isValidPosition(TurnoutPosition value);
-    virtual bool doSetPosition(TurnoutPosition value);
+    virtual bool doSetPosition(TurnoutPosition value, bool skipAction = false);
+
+    void connectOutputMap();
 
   public:
     boost::signals2::signal<void (const TurnoutRailTile&, TurnoutPosition)> positionChanged;
@@ -57,6 +61,7 @@ class TurnoutRailTile : public RailTile
     std::optional<std::reference_wrapper<Node>> node() final { return m_node; }
 
     virtual bool reserve(TurnoutPosition turnoutPosition, bool dryRun = false);
+    bool release(bool dryRun = false);
 };
 
 #endif
