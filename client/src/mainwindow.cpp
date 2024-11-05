@@ -171,7 +171,6 @@ MainWindow::MainWindow(QWidget* parent) :
           if(const ObjectPtr& traintastic = m_connection->traintastic())
             traintastic->callMethod("close_world");
       });
-    m_actionCloseWorld->setShortcut(QKeySequence::Close);
     menu->addSeparator();
     m_actionImportWorld = menu->addAction(Theme::getIcon("world_import"), Locale::tr("qtapp.mainmenu:import_world") + "...",
       [this]()
@@ -761,13 +760,21 @@ void MainWindow::loadWorld()
   if(!m_connection)
     return;
 
-  std::unique_ptr<WorldListDialog> d = std::make_unique<WorldListDialog>(m_connection, this);
-  if(d->exec() == QDialog::Accepted)
-  {
-    Method* method = m_connection->traintastic()->getMethod("load_world");
-    if(Q_LIKELY(method))
-      method->call(d->uuid());
-  }
+  m_loadWorldDialog = std::make_unique<WorldListDialog>(m_connection, this);
+  connect(m_loadWorldDialog.get(), &WorldListDialog::finished,
+    [this](int result)
+    {
+      if(result == QDialog::Accepted)
+      {
+        if(Method* method = m_connection->traintastic()->getMethod("load_world")) /*[[likely]]*/
+        {
+          method->call(m_loadWorldDialog->uuid());
+        }
+      }
+      m_loadWorldDialog.release()->deleteLater();
+    });
+  m_loadWorldDialog->setModal(true);
+  m_loadWorldDialog->show();
 }
 
 void MainWindow::toggleFullScreen()
@@ -970,6 +977,10 @@ void MainWindow::connectionStateChanged()
   if(m_connection && m_connection->state() == Connection::State::Disconnected)
   {
     m_connection.reset();
+    if(m_loadWorldDialog)
+    {
+      m_loadWorldDialog->reject();
+    }
     if(m_serverLog)
     {
       delete m_serverLog;

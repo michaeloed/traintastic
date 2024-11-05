@@ -1,9 +1,9 @@
 /**
- * server/src/utils/attributes.hpp
+ * client/src/widget/unitpropertycombobox.hpp
  *
  * This file is part of the traintastic source code.
  *
- * Copyright (C) 2019-2020 Reinder Feenstra
+ * Copyright (C) 2024 Reinder Feenstra
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,9 +20,28 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef TRAINTASTIC_SERVER_UTILS_ATTRIBUTES_HPP
-#define TRAINTASTIC_SERVER_UTILS_ATTRIBUTES_HPP
+#ifndef TRAINTASTIC_CLIENT_WIDGET_UNITPROPERTYCOMBOBOX_HPP
+#define TRAINTASTIC_CLIENT_WIDGET_UNITPROPERTYCOMBOBOX_HPP
 
+#include <QWidget>
 
+class UnitProperty;
+class QComboBox;
 
-#endif // ATTRIBUTES_HPP
+class UnitPropertyComboBox : public QWidget
+{
+  Q_OBJECT
+
+  private:
+    UnitProperty& m_property;
+    size_t m_internalUpdate = 0;
+    QComboBox* m_valueComboBox;
+    QComboBox* m_unitComboBox;
+
+    void updateValues();
+
+  public:
+    explicit UnitPropertyComboBox(UnitProperty& property, QWidget* parent = nullptr);
+};
+
+#endif

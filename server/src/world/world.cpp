@@ -67,6 +67,8 @@
 #include "../train/trainlist.hpp"
 #include "../vehicle/rail/railvehiclelist.hpp"
 #include "../lua/scriptlist.hpp"
+#include "../status/simulationstatus.hpp"
+#include "../utils/category.hpp"
 
 using nlohmann::json;
 
@@ -120,6 +122,8 @@ void World::init(World& world)
 
   world.linkRailTiles.setValueInternal(std::make_shared<LinkRailTileList>(world, world.linkRailTiles.name()));
   world.nxManager.setValueInternal(std::make_shared<NXManager>(world, world.nxManager.name()));
+
+  world.simulationStatus.setValueInternal(std::make_shared<SimulationStatus>(world, world.simulationStatus.name()));
 }
 
 World::World(Private /*unused*/) :
@@ -144,6 +148,9 @@ World::World(Private /*unused*/) :
         powerOnWhenLoaded = true; // can't run without power
       }
     }},
+  correctOutputPosWhenLocked{this, "correct_output_pos_when_locked", true, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::NoScript},
+  extOutputChangeAction{this, "ext_output_change_action", ExternalOutputChangeAction::EmergencyStopTrain, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::NoScript},
+  pathReleaseDelay{this, "path_release_delay", 5000, PropertyFlags::ReadWrite | PropertyFlags::Store | PropertyFlags::NoScript},
   decoderControllers{this, "input_controllers", nullptr, PropertyFlags::ReadOnly | PropertyFlags::SubObject | PropertyFlags::NoStore},
   inputControllers{this, "input_controllers", nullptr, PropertyFlags::ReadOnly | PropertyFlags::SubObject | PropertyFlags::NoStore},
   outputControllers{this, "output_controllers", nullptr, PropertyFlags::ReadOnly | PropertyFlags::SubObject | PropertyFlags::NoStore},
@@ -223,8 +230,18 @@ World::World(Private /*unused*/) :
   simulation{this, "simulation", false, PropertyFlags::ReadWrite | PropertyFlags::NoStore,
     [this](bool value)
     {
+      simulationStatus->enabled.setValueInternal(value);
+      if(value)
+      {
+        statuses.appendInternal(simulationStatus.value());
+      }
+      else
+      {
+        statuses.removeInternal(simulationStatus.value());
+      }
       event(value ? WorldEvent::SimulationEnabled : WorldEvent::SimulationDisabled);
     }},
+  simulationStatus{this, "simulation_status", nullptr, PropertyFlags::ReadOnly | PropertyFlags::NoStore},
   save{*this, "save", MethodFlags::NoScript,
     [this]()
     {
@@ -307,6 +324,20 @@ World::World(Private /*unused*/) :
   m_interfaceItems.add(onlineWhenLoaded);
   m_interfaceItems.add(powerOnWhenLoaded);
   m_interfaceItems.add(runWhenLoaded);
+
+  Attributes::addCategory(correctOutputPosWhenLocked, Category::trains);
+  Attributes::addEnabled(correctOutputPosWhenLocked, true);
+  m_interfaceItems.add(correctOutputPosWhenLocked);
+
+  Attributes::addCategory(extOutputChangeAction, Category::trains);
+  Attributes::addEnabled(extOutputChangeAction, true);
+  Attributes::addValues(extOutputChangeAction, extOutputChangeActionValues);
+  m_interfaceItems.add(extOutputChangeAction);
+
+  Attributes::addCategory(pathReleaseDelay, Category::trains);
+  Attributes::addEnabled(pathReleaseDelay, true);
+  Attributes::addMinMax(pathReleaseDelay, {0, 15000}); // Up to 15 seconds
+  m_interfaceItems.add(pathReleaseDelay);
 
   Attributes::addObjectEditor(decoderControllers, false);
   m_interfaceItems.add(decoderControllers);
